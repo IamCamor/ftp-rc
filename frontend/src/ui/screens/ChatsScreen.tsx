@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Container, Typography, Paper, TextField, Button, Stack, Alert, Grid, List, ListItem, ListItemText, Divider } from "@mui/material";
+import { Container, Typography, Paper, TextField, Button, Stack, Alert, Grid, List, ListItemText, Divider, ListItemButton } from "@mui/material";
 const API_BASE = (import.meta as any).env?.VITE_API_BASE || "http://127.0.0.1:8000/api";
 function authHeaders(json = true){ const t=localStorage.getItem("token"); const h:any = json?{ "Content-Type":"application/json"}:{}; if(t) h["Authorization"] = `Bearer ${t}`; return h; }
 
@@ -53,9 +53,9 @@ export default function ChatsScreen() {
           <Paper sx={{ p:1 }}>
             <List dense>
               {rooms.map(r => (
-                <ListItem key={r.id} button onClick={() => openRoom(r)} selected={active?.id===r.id}>
+                <ListItemButton key={r.id} onClick={() => openRoom(r)} selected={active?.id===r.id}>
                   <ListItemText primary={r.title || ("Room #"+r.id)} secondary={r.is_group ? "Group" : "Direct"} />
-                </ListItem>
+                </ListItemButton>
               ))}
             </List>
           </Paper>

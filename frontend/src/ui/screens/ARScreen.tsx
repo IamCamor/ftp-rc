@@ -1,6 +1,10 @@
 import React from 'react'
 import { Box, Typography } from '@mui/material'
 
+declare global {
+  interface DeviceOrientationEvent { webkitCompassHeading?: number }
+}
+
 export default function ARScreen(){
   const videoRef = React.useRef<HTMLVideoElement|null>(null)
   const [heading, setHeading] = React.useState(0)

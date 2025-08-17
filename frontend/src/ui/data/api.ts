@@ -1,5 +1,5 @@
 // frontend/src/ui/data/api.ts
-import axios from 'axios'
+import axios, { AxiosHeaders } from 'axios'
 import { mockMapPoints } from '../../mocks/api'
 
 // --- флаги и базовый axios ---
@@ -9,7 +9,11 @@ export const http = axios.create({ baseURL: base })
 
 http.interceptors.request.use((cfg) => {
   const t = localStorage.getItem('token')
-  if (t) cfg.headers = { ...cfg.headers, Authorization: `Bearer ${t}` }
+  if (t) {
+    const headers = new AxiosHeaders(cfg.headers)
+    headers.set('Authorization', `Bearer ${t}`)
+    cfg.headers = headers
+  }
   return cfg
 })
 
@@ -20,9 +24,12 @@ export type MapPoint = {
   description?: string
   lat: number
   lng: number
-  type: 'spot' | 'shop' | 'slip' | 'base'
+  type: 'spot' | 'shop' | 'slip' | 'base' | 'catch'
   is_featured: boolean
   visibility: string
+  species?: string
+  weight?: number
+  length?: number
 }
 
 export type CatchRecord = {

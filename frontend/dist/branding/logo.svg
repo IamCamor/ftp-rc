@@ -1,0 +1,1 @@
+<svg xmlns='http://www.w3.org/2000/svg' width='96' height='96'><defs><filter id='s' x='-50%' y='-50%' width='200%' height='200%'><feDropShadow dx='0' dy='2' stdDeviation='2' flood-color='#000' flood-opacity='.25'/></filter></defs><circle cx='48' cy='48' r='44' fill='#0E7490'/><path d='M16 46 Q 48 18, 80 46 Q 48 74, 16 46Z' fill='#22C55E' filter='url(#s)'/></svg>

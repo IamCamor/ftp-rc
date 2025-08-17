@@ -19,7 +19,7 @@ export default function MapScreen(){
   const toggleFeatured = () => setFeatured(prev => prev === true ? undefined : true)
 
   const onAdd = (v: CatchForm) => {
-    addPointLocal({ id:0, title:v.title, lat:v.lat, lng:v.lng, type:v.type, is_featured:false, visibility:'public', species: v.type==='catch'? v.species: undefined, weight:v.weight, length:v.length })
+    addPointLocal({ title:v.title, lat:v.lat, lng:v.lng, type:v.type, is_featured:false, visibility:'public' })
     setDialogOpen(false)
   }
 
