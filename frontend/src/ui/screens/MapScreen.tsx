@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo, useState } from "react";
 import { Container, Typography, Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField, MenuItem, Stack, Alert } from "@mui/material";
 import MapView from "../components/map/MapView";
 const API = (import.meta as any).env?.VITE_API_BASE || "http://127.0.0.1:8000/api";
@@ -9,7 +9,13 @@ export default function MapScreen(){
   const [form, setForm] = React.useState({ title:"", category:"spot", description:"" });
   const [file, setFile] = React.useState<File|null>(null);
   const [msg,setMsg]=React.useState<string|null>(null); const [err,setErr]=React.useState<string|null>(null);
-  const onAdd = (lat:number,lng:number) => { setPos({lat,lng}); setOpen(true); };
+
+  const onAdd = () => {
+    if (!navigator.geolocation) { setPos({lat:55.751244, lng:37.618423}); setOpen(true); return; }
+    navigator.geolocation.getCurrentPosition(p => { setPos({lat:p.coords.latitude,lng:p.coords.longitude}); setOpen(true); },
+      () => { setPos({lat:55.751244, lng:37.618423}); setOpen(true); });
+  };
+
   const submit = async () => {
     setErr(null); setMsg(null);
     try{
@@ -24,10 +30,13 @@ export default function MapScreen(){
       setTimeout(()=>{ setOpen(false); }, 1200);
     }catch(e:any){ setErr(e.message); }
   };
+
   return (
     <Container sx={{py:3}}>
       <Typography variant="h5" gutterBottom>Карта</Typography>
-      <MapView onAdd={onAdd}/>
+      <Button variant="contained" onClick={onAdd} sx={{mb:2}}>Добавить точку по моему местоположению</Button>
+      <MapView/>
+
       <Dialog open={open} onClose={()=>setOpen(false)}>
         <DialogTitle>Новая точка</DialogTitle>
         <DialogContent>
@@ -43,7 +52,6 @@ export default function MapScreen(){
             </TextField>
             <TextField label="Описание" multiline minRows={3} value={form.description} onChange={e=>setForm({...form, description:e.target.value})}/>
             <Button variant="outlined" component="label">Фото<input type="file" hidden accept="image/*" onChange={e=>setFile(e.target.files?.[0]||null)} /></Button>
-            {file && <Typography variant="body2">Файл: {file.name}</Typography>}
           </Stack>
         </DialogContent>
         <DialogActions>
