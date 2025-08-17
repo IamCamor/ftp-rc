@@ -4,29 +4,14 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use App\Models\CatchRecord;
+use Illuminate\Support\Facades\DB;
 
 class FeedController extends Controller
 {
-    public function global(Request $request)
+    public function index(Request $r)
     {
-        $q = CatchRecord::query()->latest()->withCount('likes')->with('media');
-        return $q->paginate(20);
-    }
-
-    public function local(Request $request)
-    {
-        $request->validate(['near' => 'required']);
-        [$lat,$lng,$km] = array_map('floatval', explode(',', $request->string('near')));
-        $d = $km/111.0;
-        $q = CatchRecord::whereBetween('lat',[$lat-$d,$lat+$d])
-                        ->whereBetween('lng',[$lng-$d,$lng+$d])
-                        ->latest()->withCount('likes');
-        return $q->paginate(20);
-    }
-
-    public function follow(Request $request)
-    {
-        return $this->global($request);
+        $tab = $r->string('tab','global');
+        $items = DB::table('catch_records')->orderByDesc('id')->limit(100)->get();
+        return response()->json(['tab'=>$tab,'items'=>$items]);
     }
 }

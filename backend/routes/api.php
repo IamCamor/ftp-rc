@@ -2,99 +2,59 @@
 
 use Illuminate\Support\Facades\Route;
 
+require base_path('routes/api_s7.php');
+require base_path('routes/api_public.php');
+require base_path('routes/api_payments.php');
+require base_path('routes/api_admin.php');
+
+use App\Http\Controllers\Api\Auth\SocialAuthController;
+use App\Http\Controllers\Api\Bot\TelegramBotController;
+use App\Http\Controllers\Api\PushController;
+use App\Http\Controllers\Api\AnalyticsController;
+// Core demo endpoints (map, catches, feed, events, clubs, chats, notifications, weather)
 use App\Http\Controllers\Api\MapController;
 use App\Http\Controllers\Api\CatchesController;
 use App\Http\Controllers\Api\FeedController;
-use App\Http\Controllers\Api\ModerationController;
-
-use App\Http\Controllers\Api\FriendsController;
-use App\Http\Controllers\Api\ClubsController;
 use App\Http\Controllers\Api\EventsController;
-use App\Http\Controllers\Api\NotificationsController;
+use App\Http\Controllers\Api\ClubsController;
 use App\Http\Controllers\Api\ChatsController;
+use App\Http\Controllers\Api\NotificationsController;
+
 use App\Http\Controllers\Api\BillingController;
 use App\Http\Controllers\Api\BannersController;
 use App\Http\Controllers\Api\SearchController;
 use App\Http\Controllers\Api\WeatherController;
 
-use App\Http\Controllers\Api\ConfigController;
+Route::get('/map/points', [MapController::class, 'index']);
+Route::post('/map/points', [MapController::class, 'store']);
 
-/*
-|--------------------------------------------------------------------------
-| API Routes — FishTrackPro
-|--------------------------------------------------------------------------
-| Публичные: карта (чтение), фиды, события/клубы (списки).
-| Защищённые: создание/редактирование, лайки/комменты, друзья/клубы/ивенты,
-| уведомления, чаты.
-| Админ: модерация (очередь/approve/reject).
-|--------------------------------------------------------------------------
-*/
+Route::get('/catches', [CatchesController::class, 'index']);
+Route::post('/catches', [CatchesController::class, 'store']);
+Route::post('/catches/{id}/media', [CatchesController::class, 'uploadMedia']);
+Route::post('/catches/{id}/like', [CatchesController::class, 'like']);
+Route::post('/catches/{id}/comment', [CatchesController::class, 'comment']);
 
-// --- Healthcheck (опционально)
-Route::get('/health', fn() => ['ok' => true, 'time' => now()->toISOString()]);
+Route::get('/feed', [FeedController::class, 'index']);
+Route::get('/events', [EventsController::class, 'index']);
+Route::get('/clubs', [ClubsController::class, 'index']);
+Route::get('/chats', [ChatsController::class, 'index']);
+Route::post('/chats/{id}/message', [ChatsController::class, 'send']);
+Route::get('/notifications', [NotificationsController::class, 'index']);
 
-// --- Публичные фиды
-Route::get('/feed/global', [FeedController::class, 'global']);
-Route::get('/feed/local',  [FeedController::class, 'local']);   // near=lat,lng,km
-Route::get('/feed/follow', [FeedController::class, 'follow']);  // сейчас = global
+Route::get('/weather', [WeatherController::class, 'show']);
 
-// --- Карта (чтение)
-Route::get('/map/points', [MapController::class, 'index']);     // ?type=spot,shop,slip,base&featured=1&near=lat,lng,km
 
-// --- Публичные списки S3
-Route::get('/events', [EventsController::class, 'index']);      // ?region=...&from=YYYY-MM-DD&to=YYYY-MM-DD
-Route::get('/clubs',  [ClubsController::class, 'index']);
-
-// --- Защищённые (Sanctum)
-Route::middleware('auth:sanctum')->group(function () {
-
-    // Карта — создание/редактирование
-    Route::post('/map/points',            [MapController::class, 'store']);
-    Route::put('/map/points/{id}',        [MapController::class, 'update']);
-    Route::delete('/map/points/{id}',     [MapController::class, 'destroy']);
-
-    // Уловы
-    Route::post('/catches',               [CatchesController::class, 'store']);
-    Route::post('/catches/{id}/media',    [CatchesController::class, 'uploadMedia']);
-
-    // Соц. действия
-    Route::post('/feed/{id}/like',        [CatchesController::class, 'like']);
-    Route::post('/feed/{id}/unlike',      [CatchesController::class, 'unlike']);
-    Route::post('/feed/{id}/comment',     [CatchesController::class, 'comment']);
-
-    // Друзья
-    Route::get('/friends',                [FriendsController::class, 'index']);
-    Route::post('/friends/request',       [FriendsController::class, 'request']);
-    Route::post('/friends/{id}/accept',   [FriendsController::class, 'accept']);
-    Route::post('/friends/{id}/decline',  [FriendsController::class, 'decline']);
-
-    // Клубы/команды
-    Route::post('/clubs',                 [ClubsController::class, 'store']);
-    Route::get('/clubs/{id}',             [ClubsController::class, 'show']);
-    Route::post('/clubs/{id}/join',       [ClubsController::class, 'join']);
-    Route::post('/clubs/{id}/leave',      [ClubsController::class, 'leave']);
-
-    // События
-    Route::post('/events',                        [EventsController::class, 'store']);
-    Route::post('/events/{id}/subscribe',         [EventsController::class, 'subscribe']);
-    Route::post('/events/{id}/unsubscribe',       [EventsController::class, 'unsubscribe']);
-
-    // Уведомления
-    Route::get('/notifications',                  [NotificationsController::class, 'index']);   // ?type=&read=
-    Route::post('/notifications/{id}/read',       [NotificationsController::class, 'markRead']);
-
-    // Чаты
-    Route::get('/chats',                          [ChatsController::class, 'rooms']);
-    Route::get('/chats/{roomId}/messages',        [ChatsController::class, 'messages']);
-    Route::post('/chats/{roomId}/send',           [ChatsController::class, 'send']);
+Route::prefix('auth')->group(function () {
+    Route::post('/google', [SocialAuthController::class, 'google']);
+    Route::post('/apple', [SocialAuthController::class, 'apple']);
+    Route::post('/telegram', [SocialAuthController::class, 'telegram']);
 });
 
-// --- Админка (модерация)
-Route::middleware(['auth:sanctum', 'can:admin'])->group(function () {
-    Route::get('/admin/moderation',               [ModerationController::class, 'index']);
-    Route::post('/admin/moderation/{id}/approve', [ModerationController::class, 'approve']);
-    Route::post('/admin/moderation/{id}/reject',  [ModerationController::class, 'reject']);
-});
+Route::post('/bot/telegram/webhook', [TelegramBotController::class, 'webhook']);
+Route::post('/analytics/event', [AnalyticsController::class, 'store']);
+Route::post('/push/register', [PushController::class, 'register']);
+Route::post('/push/test', [PushController::class, 'test']);
+
 
 
 Route::middleware('auth:sanctum')->group(function(){ Route::post('/billing/payment',[BillingController::class,'createPayment']); Route::get('/billing/subscription',[BillingController::class,'mySubscription']); Route::post('/billing/subscription/cancel',[BillingController::class,'cancel']); });
@@ -103,6 +63,4 @@ Route::get('/banners/slots',[BannersController::class,'slots']);
 Route::get('/banners/slot/{code}',[BannersController::class,'listForSlot']);
 Route::post('/banners/{id}/impression',[BannersController::class,'impression'])->middleware('throttle:60,1');
 Route::get('/search',[SearchController::class,'global']);
-Route::get('/weather', [WeatherController::class, 'index']); 
-
-Route::get('/config/ui', [ConfigController::class, 'ui']);
+Route::get('/weather',[WeatherController::class,'current']);

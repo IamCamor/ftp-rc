@@ -1,19 +1,35 @@
 <?php
+
 namespace App\Http\Controllers\Api;
+
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use App\Models\Club;
-use App\Models\ClubMember;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
-class ClubsController extends Controller {
-  public function index(){ return Club::withCount('members')->paginate(20); }
-  public function store(Request $r){
-    $data = $r->validate(['name'=>'required|string|max:255','description'=>'nullable|string']);
-    $club = Club::create($data + ['owner_id'=>auth()->id()]);
-    ClubMember::create(['club_id'=>$club->id,'user_id'=>auth()->id(),'role'=>'admin']);
-    return response()->json($club,201);
-  }
-  public function show($id){ return Club::with('members')->findOrFail($id); }
-  public function join($id){ ClubMember::firstOrCreate(['club_id'=>$id,'user_id'=>auth()->id()]); return ['ok'=>true]; }
-  public function leave($id){ ClubMember::where(['club_id'=>$id,'user_id'=>auth()->id()])->delete(); return ['ok'=>true]; }
+class ClubsController extends Controller
+{
+    public function index() { return response()->json(DB::table('clubs')->orderBy('name')->limit(100)->get()); }
+
+    public function store(Request $r)
+    {
+        $id = DB::table('clubs')->insertGetId([
+            'name'=>$r->string('name','Клуб'),
+            'region'=>$r->string('region', null),
+            'description'=>$r->string('description', null),
+            'logo_url'=>null,
+            'members_count'=>0,
+            'created_at'=>now(), 'updated_at'=>now()
+        ]);
+        return response()->json(DB::table('clubs')->where('id',$id)->first(), 201);
+    }
+
+    public function logo(Request $r, int $id)
+    {
+        if (!$r->hasFile('file')) return response()->json(['error'=>'file_required'], 422);
+        $path = $r->file('file')->store('public/clubs');
+        $url = Storage::url($path);
+        DB::table('clubs')->where('id',$id)->update(['logo_url'=>$url, 'updated_at'=>now()]);
+        return response()->json(['ok'=>true,'url'=>$url]);
+    }
 }

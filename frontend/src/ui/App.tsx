@@ -9,30 +9,28 @@ import EventIcon from "@mui/icons-material/Event";
 import ChatIcon from "@mui/icons-material/Chat";
 import NotificationsIcon from "@mui/icons-material/Notifications";
 import StarIcon from "@mui/icons-material/Star";
-
 import PublicProfile from "./screens/PublicProfile";
 import PublicCatch from "./screens/PublicCatch";
 import SubscribeScreen from "./screens/SubscribeScreen";
-import PaywallGuard from "./components/PaywallGuard";
+import PaywallGuard from "../components/PaywallGuard";
+import AddCatchForm from "../components/forms/AddCatchForm";
 
 const MapScreen = () => <Container sx={{py:3}}><Typography variant="h5">Карта</Typography></Container>;
 const FeedScreen = () => <Container sx={{py:3}}><Typography variant="h5">Лента</Typography></Container>;
-const AddCatchScreen = () => <Container sx={{py:3}}><Typography variant="h5">Добавить улов</Typography></Container>;
+const AddCatchScreen = () => <Container sx={{py:3}}><Typography variant="h5">Добавить улов</Typography><AddCatchForm/></Container>;
 const ClubsScreen = () => <Container sx={{py:3}}><Typography variant="h5">Клубы</Typography></Container>;
 const EventsScreen = () => <Container sx={{py:3}}><Typography variant="h5">События</Typography></Container>;
 const ChatsScreen = () => <Container sx={{py:3}}><Typography variant="h5">Чаты</Typography></Container>;
 const NotificationsScreen = () => <Container sx={{py:3}}><Typography variant="h5">Уведомления</Typography></Container>;
-const ARView = () => <Container sx={{py:3}}><Typography variant="h5">AR режим</Typography></Container>;
+const ARView = () => <Container sx={{py:3}}><Typography variant="h5">AR режим (Pro)</Typography></Container>;
 
 function buildTheme(mode: "light" | "dark") {
   return createTheme({ palette: { mode }, shape: { borderRadius: 14 } });
 }
-
 export default function App() {
   const [mode, setMode] = useState<"light" | "dark">("light");
   const theme = useMemo(() => buildTheme(mode), [mode]);
   const [tab, setTab] = useState(0);
-
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
@@ -46,7 +44,6 @@ export default function App() {
             <Button color="inherit" onClick={() => setMode(mode === "light" ? "dark" : "light")}>{mode === "light" ? "Тёмная" : "Светлая"}</Button>
           </Toolbar>
         </AppBar>
-
         <Container sx={{ py: 2 }}>
           <Routes>
             <Route path="/" element={<FeedScreen />} />
@@ -62,7 +59,6 @@ export default function App() {
             <Route path="/ar" element={<PaywallGuard require="pro"><ARView /></PaywallGuard>} />
           </Routes>
         </Container>
-
         <Paper sx={{ position: "fixed", left: 0, right: 0, bottom: 0 }} elevation={8}>
           <BottomNavigation value={tab} onChange={(_e, v) => setTab(v)} showLabels>
             <BottomNavigationAction component={Link} to="/" label="Лента" icon={<PublicIcon />} />

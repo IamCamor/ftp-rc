@@ -1,33 +1,39 @@
 <?php
+
 namespace App\Http\Controllers\Api;
+
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use App\Models\Event;
-use App\Models\EventSubscription;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
-class EventsController extends Controller {
-  public function index(Request $r){
-    $q = Event::query();
-    if ($r->filled('region')) $q->where('region',$r->string('region'));
-    if ($r->filled('from')) $q->whereDate('starts_at','>=',$r->date('from'));
-    if ($r->filled('to')) $q->whereDate('starts_at','<=',$r->date('to'));
-    return $q->orderBy('starts_at','asc')->paginate(20);
-  }
-  public function store(Request $r){
-    $data = $r->validate([
-      'title'=>'required|string|max:255','description'=>'nullable|string',
-      'starts_at'=>'required|date','ends_at'=>'nullable|date|after_or_equal:starts_at',
-      'region'=>'nullable|string|max:255'
-    ]);
-    $ev = Event::create($data + ['creator_id'=>auth()->id()]);
-    return response()->json($ev,201);
-  }
-  public function subscribe($id){
-    EventSubscription::firstOrCreate(['event_id'=>$id,'user_id'=>auth()->id()]);
-    return ['ok'=>true];
-  }
-  public function unsubscribe($id){
-    EventSubscription::where(['event_id'=>$id,'user_id'=>auth()->id()])->delete();
-    return ['ok'=>true];
-  }
+class EventsController extends Controller
+{
+    public function index() { return response()->json(DB::table('events')->orderByDesc('starts_at')->limit(100)->get()); }
+
+    public function store(Request $r)
+    {
+        $id = DB::table('events')->insertGetId([
+            'title'=>$r->string('title','Событие'),
+            'region'=>$r->string('region', null),
+            'starts_at'=>$r->string('starts_at', null),
+            'ends_at'=>$r->string('ends_at', null),
+            'description'=>$r->string('description', null),
+            'location_lat'=>$r->float('location_lat', null),
+            'location_lng'=>$r->float('location_lng', null),
+            'link'=>$r->string('link', null),
+            'org_club_id'=>null,
+            'created_at'=>now(), 'updated_at'=>now(),
+        ]);
+        return response()->json(DB::table('events')->where('id',$id)->first(), 201);
+    }
+
+    public function photo(Request $r, int $id)
+    {
+        if (!$r->hasFile('file')) return response()->json(['error'=>'file_required'], 422);
+        $path = $r->file('file')->store('public/events');
+        $url = Storage::url($path);
+        DB::table('events')->where('id',$id)->update(['photo_url'=>$url, 'updated_at'=>now()]);
+        return response()->json(['ok'=>true,'url'=>$url]);
+    }
 }

@@ -1,8 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\PublicController;
 
-Route::get('/', function () {
-    return view('welcome');
-});
-require base_path('routes/web_admin.php');
+Route::get('/robots.txt', [PublicController::class, 'robots']);
+Route::get('/sitemap.xml', [PublicController::class, 'sitemap']);

@@ -8,13 +8,16 @@ class DatabaseSeeder extends Seeder
 {
     public function run(): void
     {
-        // Точно существующие сидеры
-        if (class_exists(\Database\Seeders\UserSeeder::class)) {
-            $this->call(\Database\Seeders\UserSeeder::class);
-        }
-
-        if (class_exists(\Database\Seeders\S3DemoSeeder::class)) {
-            $this->call(\Database\Seeders\S3DemoSeeder::class);
-        }
+        $this->call([
+            UsersSeeder::class,
+            ClubsSeeder::class,
+            EventsSeeder::class,
+            StoresSeeder::class,
+            PlaceSeeder::class,
+            CatchSeeder::class,
+            NotificationsSeeder::class,
+            ChatsSeeder::class,
+            S8SlugSeeder::class,
+        ]);
     }
 }

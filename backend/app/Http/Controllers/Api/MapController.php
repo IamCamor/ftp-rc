@@ -4,36 +4,39 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use App\Models\MapPoint;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 class MapController extends Controller
 {
-    // Получить список точек
-    public function index()
+    public function index(Request $r)
     {
-        return response()->json(MapPoint::all());
+        $q = DB::table('fishing_points')->where('status','approved')->orderByDesc('is_highlighted')->orderByDesc('id');
+        if ($r->filled('category')) $q->where('category', $r->string('category'));
+        if ($r->filled('public')) $q->where('is_public', (bool)$r->boolean('public', true));
+        $items = $q->limit(1000)->get();
+        return response()->json($items);
     }
 
-    // Добавить точку
-    public function store(Request $request)
+    public function store(Request $r)
     {
-        $point = MapPoint::create($request->all());
-        return response()->json($point, 201);
+        $r->validate([ 'lat'=>'required|numeric', 'lng'=>'required|numeric', 'title'=>'required|string|max:120', 'category'=>'required|string' ]);
+        $id = DB::table('fishing_points')->insertGetId([
+            'user_id' => 1,
+            'lat'=>$r->float('lat'), 'lng'=>$r->float('lng'),
+            'title'=>$r->string('title'), 'description'=>$r->string('description', ''),
+            'category'=>$r->string('category'), 'is_public'=>$r->boolean('is_public', true),
+            'is_highlighted'=>false, 'status'=>'pending', 'created_at'=>now(), 'updated_at'=>now(),
+        ]);
+        return response()->json(DB::table('fishing_points')->where('id',$id)->first(), 201);
     }
 
-    // Обновить точку
-    public function update(Request $request, $id)
+    public function photo(Request $r, int $id)
     {
-        $point = MapPoint::findOrFail($id);
-        $point->update($request->all());
-        return response()->json($point);
-    }
-
-    // Удалить точку
-    public function destroy($id)
-    {
-        $point = MapPoint::findOrFail($id);
-        $point->delete();
-        return response()->json(null, 204);
+        if (!$r->hasFile('file')) return response()->json(['error'=>'file_required'], 422);
+        $path = $r->file('file')->store('public/points');
+        $url = Storage::url($path);
+        DB::table('fishing_points')->where('id',$id)->update(['photo_url'=>$url, 'updated_at'=>now()]);
+        return response()->json(['ok'=>true,'url'=>$url]);
     }
 }

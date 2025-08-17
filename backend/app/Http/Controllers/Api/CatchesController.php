@@ -4,84 +4,70 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use App\Models\CatchRecord;
-use App\Models\Media;
-use App\Models\CatchLike;
-use App\Models\CatchComment;
-use App\Models\ModerationItem;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Storage;
 
 class CatchesController extends Controller
 {
-    public function store(Request $request)
+    public function index(Request $r)
     {
-        $data = $request->validate([
-            'lat' => 'required|numeric',
-            'lng' => 'required|numeric',
-            'species' => 'nullable|string|max:255',
-            'length' => 'nullable|numeric',
-            'weight' => 'nullable|numeric',
-            'depth' => 'nullable|numeric',
-            'style' => 'nullable|string|max:255',
-            'lure' => 'nullable|string|max:255',
-            'tackle' => 'nullable|string|max:255',
-            'friend_id' => 'nullable|integer',
-            'privacy' => 'nullable|string|in:all,friends,groups,none',
+        $q = DB::table('catch_records')->orderByDesc('id');
+        if ($r->filled('species')) $q->where('species', $r->string('species'));
+        $items = $q->limit(200)->get();
+        return response()->json($items);
+    }
+
+    public function store(Request $r)
+    {
+        $id = DB::table('catch_records')->insertGetId([
+            'user_id'=>1,
+            'lat'=>$r->float('lat', 55.75),
+            'lng'=>$r->float('lng', 37.62),
+            'species'=>$r->string('species','Щука'),
+            'length'=>$r->float('length', null),
+            'weight'=>$r->float('weight', null),
+            'depth'=>$r->float('depth', null),
+            'style'=>$r->string('style', null),
+            'lure'=>$r->string('lure', null),
+            'tackle'=>$r->string('tackle', null),
+            'privacy'=>$r->string('privacy', 'all'),
+            'caught_at'=>$r->string('caught_at', null),
+            'water_type'=>$r->string('water_type', null),
+            'water_temp'=>$r->float('water_temp', null),
+            'wind_speed'=>$r->float('wind_speed', null),
+            'pressure'=>$r->float('pressure', null),
+            'companions'=>$r->string('companions', null),
+            'notes'=>$r->string('notes', null),
+            'created_at'=>now(), 'updated_at'=>now(),
         ]);
-        $data['user_id'] = auth()->id();
-        $rec = CatchRecord::create($data);
-        return response()->json($rec, 201);
+        return response()->json(DB::table('catch_records')->where('id',$id)->first(), 201);
     }
 
-    public function uploadMedia(Request $request, $id)
+    public function uploadMedia(Request $r, int $id)
     {
-        $catch = CatchRecord::findOrFail($id);
-        $request->validate(['file' => 'required|file|max:5120']);
-        $file = $request->file('file');
-        $path = $file->store('catches/'.$catch->id, 'public');
-        $media = Media::create([
-            'model_type' => CatchRecord::class,
-            'model_id'   => $catch->id,
-            'disk'       => 'public',
-            'path'       => $path,
-            'mime'       => $file->getMimeType(),
-            'size'       => $file->getSize(),
+        if (!$r->hasFile('file')) return response()->json(['error'=>'file_required'], 422);
+        $path = $r->file('file')->store('public/catches');
+        $url = Storage::url($path);
+        DB::table('catch_records')->where('id',$id)->update(['photo_url'=>$url, 'updated_at'=>now()]);
+        return response()->json(['ok'=>true,'url'=>$url]);
+    }
+
+    public function like(Request $r, int $id)
+    {
+        $exists = DB::table('catch_likes')->where('catch_id',$id)->where('user_id',1)->exists();
+        if ($exists) { DB::table('catch_likes')->where('catch_id',$id)->where('user_id',1)->delete(); return response()->json(['liked'=>false]); }
+        DB::table('catch_likes')->insert(['catch_id'=>$id,'user_id'=>1,'created_at'=>now()]);
+        return response()->json(['liked'=>true]);
+    }
+
+    public function comment(Request $r, int $id)
+    {
+        $r->validate(['body'=>'required|string|max:2000']);
+        $cid = DB::table('catch_comments')->insertGetId([
+            'catch_id'=>$id, 'user_id'=>1, 'body'=>$r->string('body'),
+            'is_approved'=>true, 'created_at'=>now(), 'updated_at'=>now(),
         ]);
-        return response()->json($media, 201);
-    }
-
-    public function like($id)
-    {
-        $userId = auth()->id();
-        $like = CatchLike::firstOrCreate(['catch_id' => $id, 'user_id' => $userId]);
-        return ['ok' => true, 'liked' => true, 'id' => $like->id];
-    }
-
-    public function unlike($id)
-    {
-        $userId = auth()->id();
-        CatchLike::where(['catch_id' => $id, 'user_id' => $userId])->delete();
-        return ['ok' => true, 'liked' => false];
-    }
-
-    public function comment(Request $request, $id)
-    {
-        $request->validate(['text' => 'required|string|min:1|max:2000']);
-        $comment = CatchComment::create([
-            'catch_id' => $id,
-            'user_id'  => auth()->id(),
-            'text'     => $request->string('text'),
-            'status'   => config('features.ai_moderation') ? 'pending' : 'approved',
-        ]);
-        if (config('features.ai_moderation')) {
-            ModerationItem::create([
-                'type'     => 'comment',
-                'ref_id'   => $comment->id,
-                'payload'  => ['text' => $comment->text],
-                'provider' => config('ai.provider', 'openai'),
-                'status'   => 'pending',
-            ]);
-            dispatch(new \App\Jobs\ModerateText($comment->id, 'comment'));
-        }
-        return response()->json($comment, 201);
+        return response()->json(DB::table('catch_comments')->where('id',$cid)->first(), 201);
     }
 }

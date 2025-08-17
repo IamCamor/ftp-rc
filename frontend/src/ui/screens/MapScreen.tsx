@@ -1,53 +1,56 @@
-import React from 'react'
-import { Grid, Typography, Stack, Chip, Box, Fab } from '@mui/material'
-import AddLocationAltIcon from '@mui/icons-material/AddLocationAlt'
-import GlassCard from '../components/GlassCard'
-import MapboxMap from '../components/MapboxMap'
-import AddCatchDialog, { CatchForm } from '../components/AddCatchDialog'
-import { addPointLocal } from '../data/api'
-
-const TYPE_KEYS = ['shop','slip','base','spot','catch'] as const
-type TType = typeof TYPE_KEYS[number]
+import React from "react";
+import { Container, Typography, Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField, MenuItem, Stack, Alert } from "@mui/material";
+import MapView from "../components/map/MapView";
+const API = (import.meta as any).env?.VITE_API_BASE || "http://127.0.0.1:8000/api";
 
 export default function MapScreen(){
-  const [selected, setSelected] = React.useState<TType[]>([])
-  const [featured, setFeatured] = React.useState<boolean | undefined>(undefined)
-  const [dialogOpen, setDialogOpen] = React.useState(false)
-  const [clickedCoords, setClickedCoords] = React.useState<{lat:number;lng:number}|undefined>()
-
-  const toggleType = (t: TType) => setSelected(prev => prev.includes(t) ? prev.filter(x=>x!==t) : [...prev, t])
-  const toggleFeatured = () => setFeatured(prev => prev === true ? undefined : true)
-
-  const onAdd = (v: CatchForm) => {
-    addPointLocal({ id:0, title:v.title, lat:v.lat, lng:v.lng, type:v.type, is_featured:false, visibility:'public', species: v.type==='catch'? v.species: undefined, weight:v.weight, length:v.length })
-    setDialogOpen(false)
-  }
-
+  const [open, setOpen] = React.useState(false);
+  const [pos, setPos] = React.useState<{lat:number;lng:number}|null>(null);
+  const [form, setForm] = React.useState({ title:"", category:"spot", description:"" });
+  const [file, setFile] = React.useState<File|null>(null);
+  const [msg,setMsg]=React.useState<string|null>(null); const [err,setErr]=React.useState<string|null>(null);
+  const onAdd = (lat:number,lng:number) => { setPos({lat,lng}); setOpen(true); };
+  const submit = async () => {
+    setErr(null); setMsg(null);
+    try{
+      const res = await fetch(API+"/map/points",{ method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ ...form, lat: pos?.lat, lng: pos?.lng, is_public: true }) });
+      if(!res.ok) throw new Error("Ошибка сохранения");
+      const json = await res.json();
+      if (file) {
+        const fd = new FormData(); fd.append("file", file);
+        await fetch(API+`/map/points/${json.id}/photo`, { method:"POST", body: fd });
+      }
+      setMsg("Точка отправлена на модерацию");
+      setTimeout(()=>{ setOpen(false); }, 1200);
+    }catch(e:any){ setErr(e.message); }
+  };
   return (
-    <>
-    <Grid container spacing={2}>
-      <Grid item xs={12} md={8}>
-        <MapboxMap filter={{ types: selected, featured }} onMapClick={(c)=>{ setClickedCoords(c); }} />
-      </Grid>
-      <Grid item xs={12} md={4}>
-        <GlassCard>
-          <Typography variant="h6" gutterBottom>Фильтры</Typography>
-          <Stack direction="row" spacing={1} flexWrap="wrap">
-            <Chip label="Магазины" variant={selected.includes('shop')?'filled':'outlined'} onClick={()=>toggleType('shop')} />
-            <Chip label="Слипы"    variant={selected.includes('slip')?'filled':'outlined'} onClick={()=>toggleType('slip')} />
-            <Chip label="Турбазы"  variant={selected.includes('base')?'filled':'outlined'} onClick={()=>toggleType('base')} />
-            <Chip label="Точки"    variant={selected.includes('spot')?'filled':'outlined'} onClick={()=>toggleType('spot')} />
-            <Chip label="Уловы"    variant={selected.includes('catch')?'filled':'outlined'} onClick={()=>toggleType('catch')} />
-            <Chip label={featured ? 'Только выделенные' : 'Все'} color="secondary" variant={featured?'filled':'outlined'} onClick={toggleFeatured} />
+    <Container sx={{py:3}}>
+      <Typography variant="h5" gutterBottom>Карта</Typography>
+      <MapView onAdd={onAdd}/>
+      <Dialog open={open} onClose={()=>setOpen(false)}>
+        <DialogTitle>Новая точка</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt:1 }}>
+            {msg && <Alert severity="success">{msg}</Alert>}
+            {err && <Alert severity="error">{err}</Alert>}
+            <TextField label="Название" value={form.title} onChange={e=>setForm({...form, title:e.target.value})}/>
+            <TextField label="Категория" select value={form.category} onChange={e=>setForm({...form, category:e.target.value})}>
+              <MenuItem value="spot">Место</MenuItem>
+              <MenuItem value="shop">Магазин</MenuItem>
+              <MenuItem value="slip">Слип</MenuItem>
+              <MenuItem value="resort">Турбаза</MenuItem>
+            </TextField>
+            <TextField label="Описание" multiline minRows={3} value={form.description} onChange={e=>setForm({...form, description:e.target.value})}/>
+            <Button variant="outlined" component="label">Фото<input type="file" hidden accept="image/*" onChange={e=>setFile(e.target.files?.[0]||null)} /></Button>
+            {file && <Typography variant="body2">Файл: {file.name}</Typography>}
           </Stack>
-          <Box mt={2}><Typography variant="body2" color="text.secondary">
-            Клик по карте запоминает координаты для быстрого добавления.
-          </Typography></Box>
-        </GlassCard>
-      </Grid>
-    </Grid>
-    <Fab color="primary" className="fab" onClick={()=> setDialogOpen(true)}><AddLocationAltIcon/></Fab>
-    <AddCatchDialog open={dialogOpen} onClose={()=>setDialogOpen(false)} coords={clickedCoords} onSubmit={onAdd} />
-    </>
-  )
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={()=>setOpen(false)}>Отмена</Button>
+          <Button variant="contained" onClick={submit}>Сохранить</Button>
+        </DialogActions>
+      </Dialog>
+    </Container>
+  );
 }
