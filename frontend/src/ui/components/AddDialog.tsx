@@ -14,7 +14,7 @@ export default function AddDialog({ open, onClose }: Props){
   const submit = async () => {
     if (tab === 0){
       if (useMocks){ alert('Моки: точка сохранена локально'); onClose(); return }
-      await createMapPoint({ title, lat, lng, type: 'spot' })
+      await createMapPoint({ title, lat, lng, type: 'spot', is_featured: false, visibility: 'public' })
       onClose(); reset()
     } else {
       if (useMocks){ alert('Моки: улов сохранён локально'); onClose(); return }
