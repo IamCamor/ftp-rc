@@ -1,0 +1,1 @@
+FishTrackPro — Sprint S4 Patch\n- Платежи/подписки (моки)\n- Баннеры и показы\n- Поиск\n- Погода (OpenWeather)\n- Фичи-флаги\n- Сидеры S4DemoSeeder\n\nШаги: миграции, роуты из routes/api_s4_example.php, .env для OPENWEATHER_API_KEY, db:seed --class=S4DemoSeeder\n

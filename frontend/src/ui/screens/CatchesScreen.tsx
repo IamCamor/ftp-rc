@@ -1,0 +1,1 @@
+import React from 'react'; import GlassCard from '../components/GlassCard'; import { Typography } from '@mui/material'; export default function CatchesScreen(){ return <GlassCard><Typography variant='h6'>Уловы</Typography><Typography>Демо: история уловов и фильтры.</Typography></GlassCard> }

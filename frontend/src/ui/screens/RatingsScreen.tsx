@@ -1,0 +1,1 @@
+import React from 'react'; import GlassCard from '../components/GlassCard'; import { Typography } from '@mui/material'; export default function RatingsScreen(){ return <GlassCard><Typography variant='h6'>Рейтинги</Typography><Typography>Демо: Топ-100 и рекорды по видам.</Typography></GlassCard> }

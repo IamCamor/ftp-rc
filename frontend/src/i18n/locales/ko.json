@@ -1,0 +1,14 @@
+{
+  "app.title": "FishTrackPro",
+  "nav.map": "지도",
+  "nav.feed": "피드",
+  "nav.add": "추가",
+  "nav.clubs": "클럽",
+  "nav.events": "이벤트",
+  "nav.chats": "채팅",
+  "actions.save": "저장",
+  "actions.cancel": "취소",
+  "forms.addCatch": "어획 추가",
+  "ar.title": "AR 찾기",
+  "weather.title": "날씨"
+}

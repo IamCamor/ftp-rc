@@ -1,0 +1,14 @@
+{
+  "app.title": "FishTrackPro",
+  "nav.map": "Карта",
+  "nav.feed": "Лента",
+  "nav.add": "Добавить",
+  "nav.clubs": "Клубы",
+  "nav.events": "События",
+  "nav.chats": "Чаты",
+  "actions.save": "Сохранить",
+  "actions.cancel": "Отмена",
+  "forms.addCatch": "Добавить улов",
+  "ar.title": "AR Поиск",
+  "weather.title": "Погода"
+}

@@ -1,0 +1,28 @@
+// Внеси правки в src/ui/App.tsx:
+/*
+import './i18n';
+import { buildTheme } from './theme';
+import { uiConfig } from '../config/ui';
+import BottomNav from './components/BottomNav';
+import ARView from './screens/ARView';
+
+// внутри App компонента:
+const prefersDark = useMediaQuery('(prefers-color-scheme: dark)');
+const theme = useMemo(()=> buildTheme(prefersDark ? 'dark' : 'light', uiConfig.primary, uiConfig.secondary), [prefersDark]);
+
+<ThemeProvider theme={theme}>
+  <CssBaseline/>
+  <BrowserRouter>
+    <Routes>
+      <Route path="/" element={<MapScreen/>} />
+      <Route path="/feed" element={<FeedScreen/>} />
+      <Route path="/add" element={<AddScreen/>} />
+      <Route path="/clubs" element={<ClubsScreen/>} />
+      <Route path="/events" element={<EventsScreen/>} />
+      <Route path="/chats" element={<ChatsScreen/>} />
+      <Route path="/ar" element={<ARView/>} />
+    </Routes>
+    <BottomNav/>
+  </BrowserRouter>
+</ThemeProvider>
+*/

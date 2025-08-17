@@ -1,0 +1,14 @@
+{
+  "app.title": "FishTrackPro",
+  "nav.map": "मानचित्र",
+  "nav.feed": "फ़ीड",
+  "nav.add": "जोड़ें",
+  "nav.clubs": "क्लब",
+  "nav.events": "ईवेंट",
+  "nav.chats": "चैट",
+  "actions.save": "सेव",
+  "actions.cancel": "रद्द",
+  "forms.addCatch": "कैच जोड़ें",
+  "ar.title": "AR फ़ाइंडर",
+  "weather.title": "मौसम"
+}

@@ -1,0 +1,4 @@
+<?php
+namespace Database\Factories; use Illuminate\Database\Eloquent\Factories\Factory;
+class CatchRecordFactory extends Factory { protected $model=\App\Models\CatchRecord::class;
+ public function definition(): array { $styles=['shore','boat','ice']; $privacy=['all','friends','groups','none']; return ['user_id'=>1,'lat'=>$this->faker->latitude(42.0,60.0),'lng'=>$this->faker->longitude(19.0,150.0),'species'=>$this->faker->randomElement(['Pike','Perch','Carp','Trout','Zander','Bream']),'length'=>$this->faker->randomFloat(1,15,120),'weight'=>$this->faker->randomFloat(2,0.2,12.0),'depth'=>$this->faker->randomFloat(1,0.5,15.0),'style'=>$this->faker->randomElement($styles),'lure'=>$this->faker->randomElement(['Wobbler','Spinner','Jig','Worm','Fly']),'tackle'=>$this->faker->randomElement(['Spinning','Feeder','Float','Fly']),'friend_id'=>null,'privacy'=>$this->faker->randomElement($privacy)]; } }

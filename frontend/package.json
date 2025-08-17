@@ -1,0 +1,35 @@
+{
+  "name": "fishtrackpro-frontend",
+  "private": true,
+  "version": "1.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:mock": "VITE_USE_MOCKS=true vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.0",
+    "@mui/icons-material": "^6.2.0",
+    "@mui/material": "^6.2.0",
+    "axios": "^1.11.0",
+    "i18next": "^23.10.0",
+    "mapbox-gl": "^2.15.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-i18next": "^14.0.5",
+    "react-router-dom": "^6.26.1",
+    "zustand": "^4.5.2"
+  },
+  "devDependencies": {
+    "@types/mapbox-gl": "^2.7.20",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@types/react-router-dom": "^5.3.3",
+    "@vitejs/plugin-react": "^4.3.1",
+    "typescript": "^5.5.4",
+    "vite": "^7.1.2"
+  }
+}

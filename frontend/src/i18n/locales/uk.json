@@ -1,0 +1,14 @@
+{
+  "app.title": "FishTrackPro",
+  "nav.map": "Карта",
+  "nav.feed": "Стрічка",
+  "nav.add": "Додати",
+  "nav.clubs": "Клуби",
+  "nav.events": "Події",
+  "nav.chats": "Чати",
+  "actions.save": "Зберегти",
+  "actions.cancel": "Скасувати",
+  "forms.addCatch": "Додати улов",
+  "ar.title": "AR Пошук",
+  "weather.title": "Погода"
+}

@@ -1,0 +1,49 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "PHP: Listen for Xdebug",
+      "type": "php",
+      "request": "launch",
+      "port": 9003,
+      "pathMappings": {
+        "/app": "${workspaceFolder}/backend"
+      }
+    },
+    {
+      "name": "Chrome: Frontend (Vite)",
+      "type": "pwa-chrome",
+      "request": "launch",
+      "url": "http://localhost:5173",
+      "webRoot": "${workspaceFolder}/frontend"
+    },
+    {
+      "name": "Chrome: Laravel (public)",
+      "type": "pwa-chrome",
+      "request": "launch",
+      "url": "http://127.0.0.1:8000",
+      "webRoot": "${workspaceFolder}/backend/public"
+    },
+    {
+      "name": "FishTrackPro: Run All (API)",
+      "type": "pwa-chrome",
+      "request": "launch",
+      "url": "http://localhost:5173",
+      "preLaunchTask": "dev: start (API)"
+    },
+    {
+      "name": "FishTrackPro: Run Front (mocks)",
+      "type": "pwa-chrome",
+      "request": "launch",
+      "url": "http://localhost:5173",
+      "preLaunchTask": "dev: start (mocks)"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Debug: PHP + Frontend",
+      "configurations": ["PHP: Listen for Xdebug", "Chrome: Frontend (Vite)"],
+      "preLaunchTask": "dev: start (API)"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "app.title": "FishTrackPro",
+  "nav.map": "الخريطة",
+  "nav.feed": "الخلاصة",
+  "nav.add": "إضافة",
+  "nav.clubs": "الأندية",
+  "nav.events": "الفعاليات",
+  "nav.chats": "الدردشة",
+  "actions.save": "حفظ",
+  "actions.cancel": "إلغاء",
+  "forms.addCatch": "إضافة صيد",
+  "ar.title": "بحث الواقع المعزز",
+  "weather.title": "الطقس"
+}

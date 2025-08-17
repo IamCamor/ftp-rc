@@ -1,0 +1,17 @@
+--- a/src/ui/App.tsx
++++ b/src/ui/App.tsx
+@@
+-import { BrowserRouter, Routes, Route, Link } from 'react-router-dom'
++import { BrowserRouter, Routes, Route, Link } from 'react-router-dom'
+@@
+-import { AppBar, Toolbar, Typography, Box, Button, Container, IconButton, CssBaseline, ThemeProvider } from '@mui/material'
++import { AppBar, Toolbar, Typography, Box, Button, Container, IconButton, CssBaseline, ThemeProvider } from '@mui/material'
++import AuthBanner from './components/AuthBanner'
+@@
+-      <BrowserRouter>
++      <BrowserRouter future={{ v7_relativeSplatPath: true, v7_startTransition: true }}>
+@@
+-          <Container sx={{ py: 3 }}>
++          <Container sx={{ py: 3 }}>
++            <AuthBanner />
+             <Routes>

@@ -1,0 +1,14 @@
+{
+  "app.title": "FishTrackPro",
+  "nav.map": "Harita",
+  "nav.feed": "Akış",
+  "nav.add": "Ekle",
+  "nav.clubs": "Kulüpler",
+  "nav.events": "Etkinlikler",
+  "nav.chats": "Sohbetler",
+  "actions.save": "Kaydet",
+  "actions.cancel": "İptal",
+  "forms.addCatch": "Av ekle",
+  "ar.title": "AR Bulucu",
+  "weather.title": "Hava"
+}

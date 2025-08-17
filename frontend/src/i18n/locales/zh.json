@@ -1,0 +1,14 @@
+{
+  "app.title": "FishTrackPro",
+  "nav.map": "地图",
+  "nav.feed": "动态",
+  "nav.add": "添加",
+  "nav.clubs": "俱乐部",
+  "nav.events": "活动",
+  "nav.chats": "聊天",
+  "actions.save": "保存",
+  "actions.cancel": "取消",
+  "forms.addCatch": "添加渔获",
+  "ar.title": "AR 搜索",
+  "weather.title": "天气"
+}

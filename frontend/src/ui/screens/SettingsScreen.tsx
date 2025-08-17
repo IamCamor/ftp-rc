@@ -1,0 +1,1 @@
+import React from 'react'; import GlassCard from '../components/GlassCard'; import { Typography } from '@mui/material'; export default function SettingsScreen(){ return <GlassCard><Typography variant='h6'>Настройки</Typography><Typography>Тема, язык, уведомления.</Typography></GlassCard> }

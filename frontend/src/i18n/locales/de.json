@@ -1,0 +1,14 @@
+{
+  "app.title": "FishTrackPro",
+  "nav.map": "Karte",
+  "nav.feed": "Feed",
+  "nav.add": "Hinzufügen",
+  "nav.clubs": "Clubs",
+  "nav.events": "Events",
+  "nav.chats": "Chats",
+  "actions.save": "Speichern",
+  "actions.cancel": "Abbrechen",
+  "forms.addCatch": "Fang hinzufügen",
+  "ar.title": "AR-Suche",
+  "weather.title": "Wetter"
+}
