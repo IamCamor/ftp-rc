@@ -1,5 +1,7 @@
 <?php
 
+require __DIR__.'/api_notifications.php';
+
 use Illuminate\Support\Facades\Route;
 
 // ========== Auth & Misc ==========
