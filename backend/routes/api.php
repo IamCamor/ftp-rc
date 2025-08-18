@@ -19,7 +19,7 @@ use App\Http\Controllers\Api\ClubsController;
 use App\Http\Controllers\Api\ChatsController;
 use App\Http\Controllers\Api\NotificationsController;
 use App\Http\Controllers\Api\WeatherController;
-
+use App\Http\Controllers\Api\HealthController;
 // ========== Public ==========
 use App\Http\Controllers\Api\PublicApiController;
 
@@ -111,3 +111,5 @@ Route::prefix('admin')->group(function () {
     Route::get('/users', [AdminUsersController::class, 'index']);
     Route::post('/users/{id}/role', [AdminUsersController::class, 'setRole']);
 });
+
+Route::get('/health', [HealthController::class, 'index']);
