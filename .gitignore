@@ -801,3 +801,5 @@ backend_mock_8001/node_modules/xtend/mutable.js
 backend_mock_8001/node_modules/xtend/package.json
 backend_mock_8001/node_modules/xtend/README.md
 backend_mock_8001/node_modules/xtend/test.js
+backend/composer.lock
+backend/composer.json
