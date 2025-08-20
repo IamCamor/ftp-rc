@@ -1,22 +1,19 @@
-export const API_BASE = (import.meta as any).env?.VITE_API_BASE || "http://127.0.0.1:8000/api";
+import axios from "axios";
+const API_BASE = import.meta.env.VITE_API_BASE || "/api";
+export const api = axios.create({ baseURL: `${API_BASE}/v1`, timeout: 10000 });
 
-export async function getJson<T = any>(path: string, params?: Record<string, any>): Promise<T> {
-  const url = new URL(API_BASE + path);
-  if (params) for (const [k,v] of Object.entries(params)) url.searchParams.set(k, String(v));
-  const r = await fetch(url.toString());
-  if (!r.ok) throw new Error("API error: " + r.status);
-  return r.json();
-}
+export type CatchItem = { id:number; lat:number; lng:number; fish:string; weight?:number; length?:number; user?:{id:number;name:string}; created_at?:string; };
+export type MapPoint = { id:number; lat:number; lng:number; title:string; type:"shop"|"slip"|"camp"|"catch"|"spot"; is_highlighted?:boolean; };
 
-export async function postJson<T = any>(path: string, body: any): Promise<T> {
-  const r = await fetch(API_BASE + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  if (!r.ok) throw new Error("API error: " + r.status);
-  return r.json();
+export async function fetchFeed(tab:"global"|"local"|"follow", coords?:{lat:number;lng:number}){
+  const url = tab==="global" ? "/feed/global" : tab==="follow" ? "/feed/follow" : "/feed/local";
+  const params = tab==="local" ? coords : undefined;
+  const { data } = await api.get(url, { params }); return data.items ?? data;
 }
-
-export async function upload(path: string, file: File, fieldName = "file"): Promise<void> {
-  const fd = new FormData();
-  fd.append(fieldName, file);
-  const r = await fetch(API_BASE + path, { method: "POST", body: fd });
-  if (!r.ok) throw new Error("Upload error: " + r.status);
+export async function fetchMapPoints(params:{bbox?:string;filter?:string}){
+  const { data } = await api.get("/map/points", { params }); return data.items ?? data;
 }
+export async function createCatch(payload:any){ return (await api.post("/catches", payload)).data; }
+export async function createEvent(payload:any){ return (await api.post("/events", payload)).data; }
+export async function createPoint(payload:any){ return (await api.post("/map/points", payload)).data; }
+export async function health(){ return (await api.get("/health")).data; }

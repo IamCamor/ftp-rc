@@ -1,53 +1,47 @@
-import React from 'react'
-import { Tabs, Tab, Box, Stack, Button, Typography, TextField, Card, CardContent, CardActions } from '@mui/material'
-import GlassCard from '../components/GlassCard'
-import * as s2 from '../data/api_patch_s2'
-type FeedItem = { id:number; species?:string; weight?:number; length?:number; lat:number; lng:number; likes?:number; comments?:{text:string}[] }
+import { useEffect, useState } from "react";
+import { fetchFeed, CatchItem } from "../data/api";
+import { Box, Chip, Grid2 as Grid, Stack, Typography, Card, CardContent, Avatar } from "@mui/material";
+
+type Tab = "global" | "local" | "follow";
 export default function FeedScreen(){
-  const [tab, setTab] = React.useState<'global'|'local'|'follow'>('global')
-  const [items, setItems] = React.useState<FeedItem[]>([])
-  const [comment, setComment] = React.useState<Record<number,string>>({})
-  const load = async () => {
-    try {
-      let data:any
-      if (tab==='global') data = await s2.getFeedGlobal()
-      if (tab==='local')  data = await s2.getFeedLocal(55.75, 37.62, 50)
-      if (tab==='follow') data = await s2.getFeedFollow()
-      data = (data?.data)||data
-      setItems(data||[])
-    } catch(e){ console.error(e) }
-  }
-  React.useEffect(()=>{ load() }, [tab])
-  const like = async (id:number) => { try{ await s2.likeCatch(id); setItems(prev=>prev.map(x=>x.id===id?{...x,likes:(x.likes||0)+1}:x)) }catch(e){ console.error(e) } }
-  const addComment = async (id:number) => { const text = comment[id]; if (!text) return; try{ await s2.commentCatch(id, text); setComment({...comment,[id]:''}) }catch(e){ console.error(e) } }
+  const [tab,setTab] = useState<Tab>("global");
+  const [items,setItems] = useState<CatchItem[]>([]);
+  const [loading,setLoading] = useState(false);
+
+  useEffect(()=>{ setLoading(true);
+    const coords = tab==="local" ? { lat:55.76, lng:37.64 } : undefined;
+    fetchFeed(tab,coords).then(setItems).catch(()=>setItems([
+      { id:101, lat:55.7, lng:37.6, fish:"Щука", weight:3.2, user:{id:1,name:"Demo"}, created_at:new Date().toISOString() },
+      { id:102, lat:59.9, lng:30.3, fish:"Окунь", weight:0.7, user:{id:2,name:"Test"} }
+    ])).finally(()=>setLoading(false)); },[tab]);
+
   return (
-    <Box>
-      <Tabs value={tab} onChange={(e,v)=>setTab(v)} sx={{ mb:2 }}>
-        <Tab value="global" label="Global" />
-        <Tab value="local"  label="Local" />
-        <Tab value="follow" label="Follow" />
-      </Tabs>
-      <Stack spacing={2}>
-        {items.map(it=>(
-          <GlassCard key={it.id}>
-            <Card elevation={0}>
-              <CardContent>
-                <Typography variant="h6">{it.species || 'Улов'} #{it.id}</Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Вес: {it.weight||'-'} | Длина: {it.length||'-'} | Координаты: {it.lat?.toFixed?.(3)}, {it.lng?.toFixed?.(3)}
-                </Typography>
-              </CardContent>
-              <CardActions><Button onClick={()=>like(it.id)}>Лайк {(it.likes||0)}</Button></CardActions>
-              <Box sx={{ px:2, pb:2 }}>
-                <Stack direction="row" spacing={1}>
-                  <TextField size="small" fullWidth placeholder="Комментарий..." value={comment[it.id]||''} onChange={(e)=>setComment({...comment,[it.id]:e.target.value})} />
-                  <Button onClick={()=>addComment(it.id)}>Отправить</Button>
-                </Stack>
-              </Box>
-            </Card>
-          </GlassCard>
-        ))}
+    <Stack spacing={2}>
+      <Typography variant="h5" color="white">Лента</Typography>
+      <Stack direction="row" spacing={1}>
+        <Chip label="Global" color={tab==="global"?"primary":"default"} onClick={()=>setTab("global")} />
+        <Chip label="Local"  color={tab==="local" ?"primary":"default"} onClick={()=>setTab("local")} />
+        <Chip label="Follow" color={tab==="follow"?"primary":"default"} onClick={()=>setTab("follow")} />
       </Stack>
-    </Box>
-  )
+      <Grid container spacing={2}>
+        {items.map(it=>(
+          <Grid size={{xs:12,md:6}} key={it.id}>
+            <Card className="glass"><CardContent>
+              <Stack direction="row" spacing={2} alignItems="center">
+                <Avatar>{(it.user?.name ?? "U").slice(0,1)}</Avatar>
+                <Stack>
+                  <Typography color="white">{it.user?.name ?? "Аноним"}</Typography>
+                  <Typography variant="body2" color="#9aa4af">{new Date(it.created_at ?? Date.now()).toLocaleString()}</Typography>
+                </Stack>
+              </Stack>
+              <Typography mt={2} color="white">
+                Улов: {it.fish} {it.weight?`• ${it.weight} кг`: ""} {it.length?`• ${it.length} см`:""}
+              </Typography>
+            </CardContent></Card>
+          </Grid>
+        ))}
+      </Grid>
+      {loading && <Typography color="#9aa4af">Загрузка…</Typography>}
+    </Stack>
+  );
 }

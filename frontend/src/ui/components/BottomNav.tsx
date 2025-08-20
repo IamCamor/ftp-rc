@@ -1,58 +1,28 @@
-import { BottomNavigation, BottomNavigationAction, Paper } from "@mui/material"
-import MapIcon from "@mui/icons-material/Map"
-import AddLocationAltIcon from "@mui/icons-material/AddLocationAlt"
-import EventIcon from "@mui/icons-material/Event"
-import GroupIcon from "@mui/icons-material/Group"
-import ChatIcon from "@mui/icons-material/Chat"
-import NotificationsIcon from "@mui/icons-material/Notifications"
-import { useNavigate, useLocation } from "react-router-dom"
+import { BottomNavigation, BottomNavigationAction, Paper } from "@mui/material";
+import MapIcon from "@mui/icons-material/Map";
+import DynamicFeedIcon from "@mui/icons-material/DynamicFeed";
+import AddLocationAltIcon from "@mui/icons-material/AddLocationAlt";
+import EventIcon from "@mui/icons-material/Event";
+import AddCircleIcon from "@mui/icons-material/AddCircle";
+import { useLocation, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
 
-interface Props {
-  value?: string
-}
-
-export default function BottomNav({ value }: Props) {
-  const navigate = useNavigate()
-  const location = useLocation()
-  const current = value || location.pathname
-
+export default function BottomNav(){
+  const nav = useNavigate(); const loc = useLocation(); const [value,setValue]=useState(0);
+  useEffect(()=>{ if(loc.pathname.startsWith("/map")) setValue(0);
+    else if(loc.pathname.startsWith("/feed")) setValue(1);
+    else if(loc.pathname.startsWith("/add/point")) setValue(2);
+    else if(loc.pathname.startsWith("/events")) setValue(3);
+    else setValue(-1); },[loc.pathname]);
   return (
-    <Paper
-      sx={{ position: "fixed", bottom: 0, left: 0, right: 0 }}
-      elevation={3}
-    >
-      <BottomNavigation
-        showLabels
-        value={current}
-        onChange={(_, newValue) => navigate(newValue)}
-      >
-        <BottomNavigationAction label="Карта" value="/" icon={<MapIcon />} />
-        <BottomNavigationAction
-          label="Добавить улов"
-          value="/add-catch"
-          icon={<AddLocationAltIcon />}
-        />
-        <BottomNavigationAction
-          label="События"
-          value="/events"
-          icon={<EventIcon />}
-        />
-        <BottomNavigationAction
-          label="Клубы"
-          value="/clubs"
-          icon={<GroupIcon />}
-        />
-        <BottomNavigationAction
-          label="Чаты"
-          value="/chats"
-          icon={<ChatIcon />}
-        />
-        <BottomNavigationAction
-          label="Уведомления"
-          value="/notifications"
-          icon={<NotificationsIcon />}
-        />
+    <Paper sx={{position:"fixed",bottom:12,left:12,right:12,borderRadius:4}} elevation={6} className="glass">
+      <BottomNavigation value={value} onChange={(_,v)=>setValue(v)} showLabels>
+        <BottomNavigationAction label="Карта" icon={<MapIcon/>} onClick={()=>nav("/map")}/>
+        <BottomNavigationAction label="Лента" icon={<DynamicFeedIcon/>} onClick={()=>nav("/feed")}/>
+        <BottomNavigationAction label="Точка" icon={<AddLocationAltIcon/>} onClick={()=>nav("/add/point")}/>
+        <BottomNavigationAction label="События" icon={<EventIcon/>} onClick={()=>nav("/events")}/>
+        <BottomNavigationAction label="Улов" icon={<AddCircleIcon/>} onClick={()=>nav("/add/catch")}/>
       </BottomNavigation>
     </Paper>
-  )
+  );
 }
