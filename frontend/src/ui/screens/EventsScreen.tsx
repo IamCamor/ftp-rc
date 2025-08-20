@@ -1,16 +1,23 @@
+import { useEffect, useState } from "react";
+import { fetchEvents, createEvent, EventItem } from "../data/api";
 import { Button, Card, CardContent, Grid2 as Grid, Stack, TextField, Typography } from "@mui/material";
-import { useState } from "react";
-import { createEvent } from "../data/api";
-type EventItem = { id:number; title:string; region?:string; starts_at?:string; description?:string };
+import LoadingOverlay from "../components/LoadingOverlay";
+import ErrorAlert from "../components/ErrorAlert";
 
 export default function EventsScreen(){
-  const [items,setItems] = useState<EventItem[]>([{ id:1, title:"Кубок по спиннингу", region:"RU-MOW", starts_at:new Date().toISOString(), description:"Демо" }]);
-  const [creating,setCreating] = useState(false);
-  const [form,setForm] = useState({ title:"", region:"", starts_at:"" });
+  const [items,setItems]=useState<EventItem[]>([]);
+  const [loading,setLoading]=useState(false);
+  const [err,setErr]=useState<string|null>(null);
+  const [creating,setCreating]=useState(false);
+  const [form,setForm]=useState({ title:"", region:"", starts_at:"" });
 
-  const submit = async ()=>{ try{ const res = await createEvent(form as any); setItems([res,...items]); }
-    catch{ setItems([{ id: items.length+1, ...form } as any, ...items]); }
-    setCreating(false); };
+  const load=async ()=>{ setLoading(true); setErr(null);
+    try{ setItems(await fetchEvents()); } catch{ setErr("Не удалось загрузить события"); }
+    finally{ setLoading(false); } };
+
+  useEffect(()=>{ load(); },[]);
+
+  const submit=async ()=>{ try{ await createEvent(form as any); setCreating(false); setForm({title:"",region:"",starts_at:""}); load(); }catch{ setErr("Не удалось создать событие"); } };
 
   return (
     <Stack spacing={2}>
@@ -18,6 +25,7 @@ export default function EventsScreen(){
         <Typography variant="h5" color="white">События</Typography>
         <Button variant="contained" onClick={()=>setCreating(true)}>Добавить</Button>
       </Stack>
+      {err && <ErrorAlert message={err}/>}
       {creating && (
         <Card className="glass"><CardContent>
           <Stack spacing={2}>
@@ -40,6 +48,7 @@ export default function EventsScreen(){
           </Grid>
         ))}
       </Grid>
+      <LoadingOverlay open={loading}/>
     </Stack>
   );
 }

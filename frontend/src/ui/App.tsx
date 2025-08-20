@@ -1,10 +1,10 @@
-import { Container, CssBaseline, ThemeProvider, createTheme } from "@mui/material";
-import { Routes, Route, NavLink } from "react-router-dom";
+import { Container, CssBaseline, ThemeProvider, createTheme, LinearProgress, Box } from "@mui/material";
+import { Routes, Route, NavLink, useLocation } from "react-router-dom";
+import { Suspense, useEffect, useState } from "react";
 import MapView from "./components/MapView";
 import FeedScreen from "./screens/FeedScreen";
-import AddCatchScreen from "./screens/AddCatchScreen";
-import AddPointScreen from "./screens/AddPointScreen";
 import EventsScreen from "./screens/EventsScreen";
+import ClubsScreen from "./screens/ClubsScreen";
 import BottomNav from "./components/BottomNav";
 
 const theme = createTheme({
@@ -19,8 +19,15 @@ function TopBar(){
       <NavLink to="/map" style={linkSx as any}>Карта</NavLink>
       <NavLink to="/feed" style={linkSx as any}>Лента</NavLink>
       <NavLink to="/events" style={linkSx as any}>События</NavLink>
+      <NavLink to="/clubs" style={linkSx as any}>Клубы</NavLink>
     </div>
   );
+}
+
+function GlobalLoader(){
+  const loc=useLocation(); const [loading,setLoading]=useState(true);
+  useEffect(()=>{ setLoading(true); const t=setTimeout(()=>setLoading(false),250); return ()=>clearTimeout(t); },[loc.pathname]);
+  return loading ? <LinearProgress/> : null;
 }
 
 export default function App(){
@@ -28,15 +35,17 @@ export default function App(){
     <ThemeProvider theme={theme}>
       <CssBaseline/>
       <TopBar/>
+      <GlobalLoader/>
       <Container sx={{ py:2, pb:12 }}>
-        <Routes>
-          <Route path="/" element={<MapView/>}/>
-          <Route path="/map" element={<MapView/>}/>
-          <Route path="/feed" element={<FeedScreen/>}/>
-          <Route path="/events" element={<EventsScreen/>}/>
-          <Route path="/add/catch" element={<AddCatchScreen/>}/>
-          <Route path="/add/point" element={<AddPointScreen/>}/>
-        </Routes>
+        <Suspense fallback={<Box sx={{my:2}}><LinearProgress/></Box>}>
+          <Routes>
+            <Route path="/" element={<MapView/>}/>
+            <Route path="/map" element={<MapView/>}/>
+            <Route path="/feed" element={<FeedScreen/>}/>
+            <Route path="/events" element={<EventsScreen/>}/>
+            <Route path="/clubs" element={<ClubsScreen/>}/>
+          </Routes>
+        </Suspense>
       </Container>
       <BottomNav/>
     </ThemeProvider>

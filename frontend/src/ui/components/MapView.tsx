@@ -1,38 +1,55 @@
-import { useEffect, useMemo, useState } from "react";
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { fetchMapPoints, MapPoint } from "../data/api";
-
-const icon = L.icon({
-  iconUrl:"https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+import { Box, ToggleButton, ToggleButtonGroup } from "@mui/material";
+const icon = L.icon({ iconUrl:"https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
   iconRetinaUrl:"https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-  shadowUrl:"https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-  iconSize:[25,41], iconAnchor:[12,41]
-});
+  shadowUrl:"https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png", iconSize:[25,41], iconAnchor:[12,41] });
 
-const DEMO:MapPoint[] = [
-  { id:1, lat:55.751244, lng:37.618423, title:"Спот: Москва-река", type:"spot", is_highlighted:true },
-  { id:2, lat:59.93863, lng:30.31413, title:"Магазин снастей", type:"shop" },
-  { id:3, lat:60.003, lng:30.2, title:"Слип", type:"slip" }
-];
+function BboxFetcher({onBbox}:{onBbox:(bbox:string)=>void}){
+  const map=useMapEvents({ moveend(){ const b=map.getBounds(); const bbox=[b.getWest(),b.getSouth(),b.getEast(),b.getNorth()].join(","); onBbox(bbox);} });
+  useEffect(()=>{ const b=map.getBounds(); const bbox=[b.getWest(),b.getSouth(),b.getEast(),b.getNorth()].join(","); onBbox(bbox);},[]);
+  return null;
+}
 
 export default function MapView(){
-  const [points,setPoints] = useState<MapPoint[]>(DEMO);
-  useEffect(()=>{ let m=true;
-    fetchMapPoints({}).then(it=>{ if(m && Array.isArray(it) && it.length) setPoints(it); })
-    .catch(()=>{}); return ()=>{ m=false; }; },[]);
-  const center = useMemo(()=>[55.76,37.64] as [number,number],[]);
+  const [points,setPoints]=useState<MapPoint[]>([]);
+  const [bbox,setBbox]=useState<string>("");
+  const [filter,setFilter]=useState<string>("");
+  const busy=useRef(false);
+
+  const load=useCallback(async ()=>{
+    if (busy.current) return; busy.current=true;
+    try{ const data=await fetchMapPoints({bbox, filter: filter || undefined}); setPoints(Array.isArray(data)?data:[]); }
+    catch{ /* тихо */ }
+    finally{ busy.current=false; }
+  },[bbox,filter]);
+
+  useEffect(()=>{ if(bbox) load(); },[bbox,filter,load]);
+
   return (
-    <div style={{height:"calc(100vh - 140px)"}}>
-      <MapContainer center={center} zoom={6} scrollWheelZoom className="glass">
-        <TileLayer attribution='&copy; OSM' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"/>
+    <Box sx={{ position:"relative", height:"calc(100vh - 140px)" }}>
+      <MapContainer center={[55.76,37.64]} zoom={6} scrollWheelZoom className="glass">
+        <TileLayer attribution="&copy; OSM" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"/>
+        <BboxFetcher onBbox={setBbox}/>
         {points.map(p=>(
           <Marker key={p.id} position={[p.lat,p.lng]} icon={icon}>
             <Popup><b>{p.title}</b><br/>Тип: {p.type}{p.is_highlighted?" ⭐":""}</Popup>
           </Marker>
         ))}
       </MapContainer>
-    </div>
+
+      <Box sx={{ position:"absolute", top:12, left:12 }} className="glass">
+        <ToggleButtonGroup size="small" exclusive value={filter} onChange={(_,v)=>setFilter(v||"")} sx={{m:1}}>
+          <ToggleButton value="">Все</ToggleButton>
+          <ToggleButton value="spot">Споты</ToggleButton>
+          <ToggleButton value="shop">Магазины</ToggleButton>
+          <ToggleButton value="slip">Слипы</ToggleButton>
+          <ToggleButton value="camp">Базы</ToggleButton>
+        </ToggleButtonGroup>
+      </Box>
+    </Box>
   );
 }
