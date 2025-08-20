@@ -1,5 +1,22 @@
-:root { --bg:#0f1216; --glass:rgba(255,255,255,.08); }
-html, body, #root { height:100%; }
-body { margin:0; font-family: Inter, system-ui, Arial, sans-serif; background:var(--bg); }
-.glass { background:var(--glass); backdrop-filter: blur(12px) saturate(1.2); border:1px solid rgba(255,255,255,.08); border-radius:16px; }
-.leaflet-container { width:100%; height:100%; border-radius:16px; }
+@import "leaflet/dist/leaflet.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+.glass { backdrop-filter: blur(20px); background: rgba(255,255,255,.20); border: 1px solid rgba(255,255,255,.3); box-shadow: 0 6px 24px rgba(0,0,0,.08); }
+.glass-soft { backdrop-filter: blur(20px); background: rgba(255,255,255,.15); border-top: 1px solid rgba(255,255,255,.25); }
+.grad-ig { background-image: linear-gradient(135deg,#FF7CA3 0%,#FFB88C 100%); }
+
+/* Слегка понижаем тайлы/оверлеи Leaflet, чтобы наш UI был сверху */
+.leaflet-pane.leaflet-tile-pane { z-index: 100 !important; }
+.leaflet-pane.leaflet-overlay-pane { z-index: 300 !important; }
+.leaflet-pane.leaflet-marker-pane { z-index: 400 !important; }
+/* попапы/контролы Leaflet оставим выше тайлов, но ниже нашего UI */
+.leaflet-pane.leaflet-popup-pane { z-index: 800 !important; }
+.leaflet-control-container { z-index: 900 !important; }
+.ui-top { z-index: 1200 !important; }
