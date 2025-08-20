@@ -1,17 +1,9 @@
 {
   "compilerOptions": {
-    "target": "ES2020",
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
-    "module": "ESNext",
-    "jsx": "react-jsx",
-    "moduleResolution": "Bundler",
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "noEmit": true,
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "types": ["vite/client", "leaflet"]
+    "target": "ES2020", "lib": ["ES2020","DOM","DOM.Iterable"],
+    "module": "ESNext", "moduleResolution": "Bundler", "resolveJsonModule": true,
+    "jsx": "react-jsx", "noEmit": true, "skipLibCheck": true,
+    "isolatedModules": true, "strict": true, "allowJs": false
   },
   "include": ["src"]
 }

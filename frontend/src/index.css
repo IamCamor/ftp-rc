@@ -1,9 +1,7 @@
 @import "leaflet/dist/leaflet.css";
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
 
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
@@ -12,11 +10,8 @@
 .glass-soft { backdrop-filter: blur(20px); background: rgba(255,255,255,.15); border-top: 1px solid rgba(255,255,255,.25); }
 .grad-ig { background-image: linear-gradient(135deg,#FF7CA3 0%,#FFB88C 100%); }
 
-/* Слегка понижаем тайлы/оверлеи Leaflet, чтобы наш UI был сверху */
 .leaflet-pane.leaflet-tile-pane { z-index: 100 !important; }
 .leaflet-pane.leaflet-overlay-pane { z-index: 300 !important; }
 .leaflet-pane.leaflet-marker-pane { z-index: 400 !important; }
-/* попапы/контролы Leaflet оставим выше тайлов, но ниже нашего UI */
 .leaflet-pane.leaflet-popup-pane { z-index: 800 !important; }
 .leaflet-control-container { z-index: 900 !important; }
-.ui-top { z-index: 1200 !important; }
