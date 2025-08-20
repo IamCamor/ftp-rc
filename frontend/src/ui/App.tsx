@@ -3,9 +3,8 @@ import { Routes, Route, NavLink, useLocation } from "react-router-dom";
 import { Suspense, useEffect, useState } from "react";
 import MapView from "./components/MapView";
 import FeedScreen from "./screens/FeedScreen";
-import EventsScreen from "./screens/EventsScreen";
-import ClubsScreen from "./screens/ClubsScreen";
-import BottomNav from "./components/BottomNav";
+import AddPointScreen from "./screens/AddPointScreen";
+import AddCatchScreen from "./screens/AddCatchScreen";
 
 const theme = createTheme({
   palette:{ mode:"dark", primary:{ main:"#57B0E6" }, secondary:{ main:"#1DE9B6" } },
@@ -18,8 +17,8 @@ function TopBar(){
     <div style={{position:"sticky",top:0,zIndex:10,padding:"12px 16px"}} className="glass">
       <NavLink to="/map" style={linkSx as any}>Карта</NavLink>
       <NavLink to="/feed" style={linkSx as any}>Лента</NavLink>
-      <NavLink to="/events" style={linkSx as any}>События</NavLink>
-      <NavLink to="/clubs" style={linkSx as any}>Клубы</NavLink>
+      <NavLink to="/add/point" style={linkSx as any}>+ Точка</NavLink>
+      <NavLink to="/add/catch" style={linkSx as any}>+ Улов</NavLink>
     </div>
   );
 }
@@ -42,12 +41,11 @@ export default function App(){
             <Route path="/" element={<MapView/>}/>
             <Route path="/map" element={<MapView/>}/>
             <Route path="/feed" element={<FeedScreen/>}/>
-            <Route path="/events" element={<EventsScreen/>}/>
-            <Route path="/clubs" element={<ClubsScreen/>}/>
+            <Route path="/add/point" element={<AddPointScreen/>}/>
+            <Route path="/add/catch" element={<AddCatchScreen/>}/>
           </Routes>
         </Suspense>
       </Container>
-      <BottomNav/>
     </ThemeProvider>
   );
 }

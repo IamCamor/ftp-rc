@@ -21,9 +21,9 @@ export default function MapView(){
   const busy=useRef(false);
 
   const load=useCallback(async ()=>{
-    if (busy.current) return; busy.current=true;
+    if (!bbox || busy.current) return; busy.current=true;
     try{ const data=await fetchMapPoints({bbox, filter: filter || undefined}); setPoints(Array.isArray(data)?data:[]); }
-    catch{ /* тихо */ }
+    catch{ /* ignore */ }
     finally{ busy.current=false; }
   },[bbox,filter]);
 
@@ -36,7 +36,10 @@ export default function MapView(){
         <BboxFetcher onBbox={setBbox}/>
         {points.map(p=>(
           <Marker key={p.id} position={[p.lat,p.lng]} icon={icon}>
-            <Popup><b>{p.title}</b><br/>Тип: {p.type}{p.is_highlighted?" ⭐":""}</Popup>
+            <Popup>
+              <b>{p.title}</b><br/>Тип: {p.type}{p.is_highlighted?" ⭐":""}
+              {p.photo?.url && <div style={{marginTop:8}}><img src={p.photo.url} style={{maxWidth:180,borderRadius:8}}/></div>}
+            </Popup>
           </Marker>
         ))}
       </MapContainer>
