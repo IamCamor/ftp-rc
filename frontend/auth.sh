@@ -1,3 +1,124 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "▶️ Patch: OAuth провайдеры + согласие + мастер профиля"
+
+ROOT="$(pwd)"
+SRC="$ROOT/src"
+DATA="$SRC/data"
+COMP="$SRC/components"
+UTILS="$SRC/utils"
+
+mkdir -p "$SRC" "$DATA" "$COMP" "$UTILS"
+
+############################################
+# .env.example — новые переменные окружения
+############################################
+if ! grep -q "VITE_LEGAL_TERMS_URL" "$ROOT/.env.example" 2>/dev/null; then
+cat >> "$ROOT/.env.example" <<'ENV'
+
+# Ссылки на документы
+VITE_LEGAL_TERMS_URL=https://fishtrackpro.ru/terms
+VITE_LEGAL_PRIVACY_URL=https://fishtrackpro.ru/privacy
+
+# Флаги доступности OAuth-провайдеров
+VITE_OAUTH_GOOGLE=1
+VITE_OAUTH_APPLE=1
+VITE_OAUTH_VK=1
+VITE_OAUTH_YANDEX=1
+ENV
+fi
+
+############################################
+# utils: query-параметры + slugify
+############################################
+cat > "$UTILS/url.ts" <<'TS'
+export function getQueryParam(name: string): string | null {
+  const url = new URL(window.location.href);
+  return url.searchParams.get(name);
+}
+export function removeQueryParams(...keys: string[]) {
+  const url = new URL(window.location.href);
+  keys.forEach(k => url.searchParams.delete(k));
+  window.history.replaceState({}, "", url.toString());
+}
+TS
+
+cat > "$UTILS/slugify.ts" <<'TS'
+export function slugify(input: string): string {
+  return input
+    .toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9_]+/g, "-")
+    .replace(/(^-|-$)/g, "")
+    .substring(0, 24);
+}
+TS
+
+############################################
+# components: чекбокс согласия
+############################################
+cat > "$COMP/ToSCheckbox.tsx" <<'TSX'
+import React from "react";
+
+export default function ToSCheckbox({checked,onChange}:{checked:boolean;onChange:(v:boolean)=>void}) {
+  const terms = (import.meta as any).env?.VITE_LEGAL_TERMS_URL || "#";
+  const privacy = (import.meta as any).env?.VITE_LEGAL_PRIVACY_URL || "#";
+  return (
+    <label className="flex items-start gap-2 text-sm text-gray-700">
+      <input type="checkbox" className="mt-1" checked={checked} onChange={e=>onChange(e.target.checked)} />
+      <span>
+        Я принимаю {" "}
+        <a className="underline" href={terms} target="_blank" rel="noreferrer">Пользовательское соглашение</a>
+        {" "} и {" "}
+        <a className="underline" href={privacy} target="_blank" rel="noreferrer">Политику конфиденциальности</a>.
+      </span>
+    </label>
+  );
+}
+TSX
+
+############################################
+# API: OAuth + мастер профиля
+############################################
+cat > "$DATA/auth_providers.ts" <<'TS'
+export type OAuthProvider = "google" | "apple" | "vk" | "yandex";
+const API_BASE = (import.meta as any).env?.VITE_API_BASE?.toString().trim() || "";
+
+export function startOAuth(provider: OAuthProvider) {
+  // Backend должен уметь принять return_uri и после колбэка вернуть token и needs_profile=1|0.
+  const returnUri = encodeURIComponent(window.location.href);
+  window.location.href = `${API_BASE}/auth/${provider}/redirect?return_uri=${returnUri}`;
+}
+TS
+
+# append/patch into data/api.ts (create if missing minimal)
+if [ ! -f "$DATA/api.ts" ]; then
+  cat > "$DATA/api.ts" <<'TS'
+const API_BASE = (import.meta as any).env?.VITE_API_BASE?.toString().trim() || "";
+export async function login(body:{email:string;password:string;}):Promise<{token:string}>{const r=await fetch(`${API_BASE}/api/v1/login`,{method:"POST",headers:{"Content-Type":"application/json",Accept:"application/json"},body:JSON.stringify(body)}); if(!r.ok) throw new Error("Неверный email или пароль"); return r.json();}
+export async function registerUser(body:{email:string;password:string;name:string;}):Promise<{token:string}>{const r=await fetch(`${API_BASE}/api/v1/register`,{method:"POST",headers:{"Content-Type":"application/json",Accept:"application/json"},body:JSON.stringify(body)}); if(!r.ok) throw new Error("Не удалось зарегистрироваться"); return r.json();}
+export async function getMe(){const r=await fetch(`${API_BASE}/api/v1/me`,{headers:{Accept:"application/json"}}); if(!r.ok) throw new Error("Не авторизованы"); return r.json();}
+export async function logout(){await fetch(`${API_BASE}/api/v1/logout`,{method:"POST"});}
+TS
+fi
+
+# idempotent append helpers
+node - <<'NODE'
+const fs=require('fs'),p='src/data/api.ts';
+let t=fs.readFileSync(p,'utf8');
+function add(name,code){ if(!t.includes(name)) t += "\n" + code + "\n"; }
+add('checkHandleAvailability',`export async function checkHandleAvailability(handle:string){ const API_BASE=(import.meta as any).env?.VITE_API_BASE?.toString().trim()||""; const r=await fetch(\`\${API_BASE}/api/v1/profile/handle-available?handle=\${encodeURIComponent(handle)}\`,{headers:{Accept:"application/json"}}); if(!r.ok) throw new Error("Ошибка проверки"); const j=await r.json(); return !!j?.available; }`);
+add('completeProfile',`export async function completeProfile(payload: FormData){ const API_BASE=(import.meta as any).env?.VITE_API_BASE?.toString().trim()||""; const r=await fetch(\`\${API_BASE}/api/v1/profile/setup\`,{ method:"POST", body: payload }); if(!r.ok) throw new Error("Не удалось сохранить профиль"); return r.json(); }`);
+add('uploadAvatar',`export async function uploadAvatar(file: File){ const API_BASE=(import.meta as any).env?.VITE_API_BASE?.toString().trim()||""; const fd=new FormData(); fd.append("avatar", file); const r=await fetch(\`\${API_BASE}/api/v1/profile/avatar\`,{ method:"POST", body: fd }); if(!r.ok) throw new Error("Не удалось загрузить аватар"); return r.json(); }`);
+fs.writeFileSync(p,t);
+console.log("✓ data/api.ts обновлён");
+NODE
+
+############################################
+# Экран авторизации с провайдерами + мастер профиля
+############################################
+cat > "$SRC/screens/AuthScreen.tsx" <<'TSX'
 import React, { useEffect, useMemo, useState } from "react";
 import { login, registerUser, checkHandleAvailability, completeProfile } from "../data/api";
 import { setToken } from "../data/auth";
@@ -205,3 +326,24 @@ export default function AuthScreen({ onClose }:{ onClose?: ()=>void }) {
     </div>
   );
 }
+TSX
+
+echo "✅ Готово. Что дальше:
+1) Проверь .env(.local/.production):
+   - VITE_API_BASE=https://api.fishtrackpro.ru
+   - VITE_LEGAL_TERMS_URL, VITE_LEGAL_PRIVACY_URL
+   - VITE_OAUTH_GOOGLE=1, VITE_OAUTH_APPLE=1, VITE_OAUTH_VK=1, VITE_OAUTH_YANDEX=1
+2) На бэкенде должны быть маршруты:
+   - POST /api/v1/login
+   - POST /api/v1/register
+   - GET  /api/v1/me
+   - POST /api/v1/logout
+   - GET  /auth/{provider}/redirect?return_uri=...
+   - (после колбэка) редирект на return_uri?token=...&needs_profile=1|0
+   - GET  /api/v1/profile/handle-available?handle=...
+   - POST /api/v1/profile/setup  (multipart: name, handle, dob?, bio?, links[...], avatar?)
+3) Пересобери фронт:
+   npm ci
+   npm run dev    # для локальной проверки
+   npm run build  # для прод
+"

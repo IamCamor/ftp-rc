@@ -51,3 +51,9 @@ export async function likePost(id:number){
   const res=await fetch(`${API_BASE}/api/v1/feed/${id}/like`,{method:"POST",headers:{Accept:"application/json",...authHeader()}});
   if(!res.ok) throw new Error("Не удалось поставить лайк"); return res.json();
 }
+
+export async function checkHandleAvailability(handle:string){ const API_BASE=(import.meta as any).env?.VITE_API_BASE?.toString().trim()||""; const r=await fetch(`${API_BASE}/api/v1/profile/handle-available?handle=${encodeURIComponent(handle)}`,{headers:{Accept:"application/json"}}); if(!r.ok) throw new Error("Ошибка проверки"); const j=await r.json(); return !!j?.available; }
+
+export async function completeProfile(payload: FormData){ const API_BASE=(import.meta as any).env?.VITE_API_BASE?.toString().trim()||""; const r=await fetch(`${API_BASE}/api/v1/profile/setup`,{ method:"POST", body: payload }); if(!r.ok) throw new Error("Не удалось сохранить профиль"); return r.json(); }
+
+export async function uploadAvatar(file: File){ const API_BASE=(import.meta as any).env?.VITE_API_BASE?.toString().trim()||""; const fd=new FormData(); fd.append("avatar", file); const r=await fetch(`${API_BASE}/api/v1/profile/avatar`,{ method:"POST", body: fd }); if(!r.ok) throw new Error("Не удалось загрузить аватар"); return r.json(); }
