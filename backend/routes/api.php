@@ -1,6 +1,8 @@
 <?php
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\{HealthController,UploadController,MapController,CatchesController};
+use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\ProfileController;
 
 Route::get('/health',[HealthController::class,'ping']);
 
@@ -23,4 +25,15 @@ Route::prefix('v1')->group(function(){
   Route::get('/catches/{id}',[CatchesController::class,'show']);
   Route::put('/catches/{id}',[CatchesController::class,'update']);
   Route::delete('/catches/{id}',[CatchesController::class,'destroy']);
+
+  Route::post('/login',    [AuthController::class, 'login']);
+  Route::post('/register', [AuthController::class, 'register']);
+  Route::post('/logout',   [AuthController::class, 'logout'])->middleware('auth:sanctum');
+  Route::get('/me',        [AuthController::class, 'me'])->middleware('auth:sanctum');
+
+    // Профиль
+  Route::get('/profile/handle-available', [ProfileController::class, 'handleAvailable']);
+  Route::post('/profile/setup',           [ProfileController::class, 'setup'])->middleware('auth:sanctum');
+  Route::post('/profile/avatar',          [ProfileController::class, 'uploadAvatar'])->middleware('auth:sanctum');
+
 });
