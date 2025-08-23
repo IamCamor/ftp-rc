@@ -92,4 +92,4 @@ if systemctl is-active --quiet nginx; then
   systemctl reload nginx || systemctl restart nginx
 fi
 
-log "✅ Деплой завершён"
+log "✅ Деплой завершён."
