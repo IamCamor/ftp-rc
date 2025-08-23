@@ -23,7 +23,7 @@ if [ ! -d ".git" ]; then
   exit 1
 fi
 
-# === GIT ОБНОВЛЕНИЕ (reset --hard, чтобы точно применять изменения) ===
+# = == GIT ОБНОВЛЕНИЕ (reset --hard, чтобы точно применять изменения) ===
 log "▶ Git fetch + reset на ветку $BRANCH"
 git fetch --all --prune
 git checkout "$BRANCH"
