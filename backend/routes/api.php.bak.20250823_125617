@@ -37,12 +37,3 @@ Route::prefix('v1')->group(function(){
   Route::post('/profile/avatar',          [ProfileController::class, 'uploadAvatar'])->middleware('auth:sanctum');
 
 });
-
-/* === Bonus System Routes (auto-insert) === */
-Route::middleware('auth:sanctum')->group(function () {
-    Route::get('/bonus/me', [BonusController::class, 'me']);
-    Route::get('/bonus/history', [BonusController::class, 'history']);
-    Route::post('/bonus/redeem-pro', [BonusController::class, 'redeemPro']);
-});
-/* === /Bonus System Routes === */
-
