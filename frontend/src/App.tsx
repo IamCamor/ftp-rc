@@ -6,8 +6,7 @@ import AuthScreen from "./screens/AuthScreen";
 import BottomNav from "./components/BottomNav";
 import { useAuthState } from "./data/auth";
 type Tab="map"|"feed"|"alerts"|"profile";
-import FeedPage from './pages/FeedPage';
-<Route path="/feed" element={<FeedPage/>} />
+
 export default function App(){
   const [tab,setTab]=useState<Tab>("map"); const {isAuthed}=useAuthState();
   const needAuth=useMemo(()=> (tab==="feed"||tab==="profile") && !isAuthed, [tab,isAuthed]);
