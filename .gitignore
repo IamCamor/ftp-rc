@@ -2273,3 +2273,4 @@ frontend/node_modules/zustand/umd/vanilla/shallow.development.js
 frontend/node_modules/zustand/umd/vanilla/shallow.production.js
 frontend/node_modules/zustand/vanilla/shallow.d.ts
 frontend/node_modules/zustand/vanilla/shallow.js
+.DS_Store
