@@ -60,3 +60,13 @@ Route::middleware('auth:sanctum')->group(function () {
 
 
 
+
+// --- WRITE ENDPOINTS (create catch/place) ---
+use App\Http\Controllers\Api\CatchWriteController;
+use App\Http\Controllers\Api\PointWriteController;
+
+Route::prefix('v1')->group(function () {
+    Route::post('/catches', [CatchWriteController::class,'store']); // POST /api/v1/catches
+    Route::post('/points',  [PointWriteController::class,'store']); // POST /api/v1/points
+    Route::get('/points/categories', [PointWriteController::class,'categories']); // справочник
+});

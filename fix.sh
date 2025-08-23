@@ -5,395 +5,444 @@ ROOT="$(pwd)"
 BACK="$ROOT/backend"
 FRONT="$ROOT/frontend"
 
-echo "==> Writing backend controllers..."
+echo "==> Backend: controllers & routes"
 
 mkdir -p "$BACK/app/Http/Controllers/Api"
 
-# FeedController
-cat > "$BACK/app/Http/Controllers/Api/FeedController.php" <<'PHP'
+# --- CatchWriteController ---
+cat > "$BACK/app/Http/Controllers/Api/CatchWriteController.php" <<'PHP'
 <?php
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 
-class FeedController extends Controller
+class CatchWriteController extends Controller
 {
-    public function index(Request $r)
+    public function store(Request $r)
     {
-        $limit  = min(max((int)$r->query('limit', 20), 1), 50);
-        $offset = max((int)$r->query('offset', 0), 0);
-        $q      = trim((string)$r->query('q', ''));
-        $tab    = strtolower((string)$r->query('tab', 'global')); // global|local|follow
-        $lat    = $r->query('lat');
-        $lng    = $r->query('lng');
-        $radius = (float)$r->query('radius_km', 50); // для tab=local
-
-        // Безопасные выражения под фактическую схему
-        $commentsExpr = Schema::hasColumn('catch_comments','is_approved')
-            ? '(select count(*) from catch_comments cc where cc.catch_id = cr.id and cc.is_approved = 1)'
-            : '(select count(*) from catch_comments cc where cc.catch_id = cr.id)';
-
-        $placeExpr = Schema::hasTable('fishing_points')
-            ? "(select fp.title from fishing_points fp where (fp.status = 'approved' or fp.status is null)
-                order by POW(fp.lat - cr.lat, 2) + POW(fp.lng - cr.lng, 2) asc limit 1)"
-            : "NULL";
-
-        $select = [
-            'cr.id','cr.user_id','u.name as user_name',
-            DB::raw(Schema::hasColumn('users','photo_url') ? 'u.photo_url as user_avatar' : 'NULL as user_avatar'),
-            'cr.lat','cr.lng','cr.species','cr.length','cr.weight','cr.style','cr.lure','cr.tackle','cr.notes',
-            'cr.photo_url','cr.caught_at','cr.created_at',
-            DB::raw('(select count(*) from catch_likes cl where cl.catch_id = cr.id) as likes_count'),
-            DB::raw("$commentsExpr as comments_count"),
-            DB::raw("$placeExpr as place_title"),
-            DB::raw('0 as liked_by_me')
-        ];
-
-        $qbase = DB::table('catch_records as cr')
-            ->leftJoin('users as u', 'u.id', '=', 'cr.user_id')
-            ->whereIn('cr.privacy', ['all','public','everyone']);
-
-        if ($q !== '') {
-            $qbase->where(function($w) use ($q){
-                $w->where('cr.species','like',"%{$q}%")
-                  ->orWhere('cr.lure','like',"%{$q}%")
-                  ->orWhere('cr.tackle','like',"%{$q}%")
-                  ->orWhere('cr.notes','like',"%{$q}%")
-                  ->orWhere('u.name','like',"%{$q}%");
-            });
-        }
-
-        if ($tab === 'local' && is_numeric($lat) && is_numeric($lng)) {
-            $lat = (float)$lat; $lng = (float)$lng;
-            $delta = max($radius, 1.0) / 111.0; // ~1° = 111км
-            $minLat = $lat - $delta; $maxLat = $lat + $delta;
-            $minLng = $lng - $delta; $maxLng = $lng + $delta;
-            $qbase->whereBetween('cr.lat', [$minLat, $maxLat])
-                  ->whereBetween('cr.lng', [$minLng, $maxLng]);
-        } elseif ($tab === 'follow') {
-            // Если авторизации нет — просто не фильтруем дополнительно (или верните пусто по желанию)
-            if (auth()->check() && Schema::hasTable('follows')) {
-                $uid = auth()->id();
-                $qbase->whereIn('cr.user_id', function($sub) use ($uid) {
-                    $sub->from('follows')->select('followee_id')->where('follower_id', $uid);
-                });
-            }
-        }
-
-        $items = $qbase->orderByDesc('cr.created_at')->offset($offset)->limit($limit)->get($select);
-
-        return response()->json([
-            'items'  => $items,
-            'limit'  => $limit,
-            'offset' => $offset,
-            'next'   => count($items) === $limit ? $offset + $limit : null,
+        // Валидация под вашу таблицу catch_records
+        $data = $r->validate([
+            'user_id'   => 'nullable|integer|exists:users,id',
+            'lat'       => 'required|numeric',
+            'lng'       => 'required|numeric',
+            'species'   => 'nullable|string|max:255',
+            'length'    => 'nullable|numeric',
+            'weight'    => 'nullable|numeric',
+            'depth'     => 'nullable|numeric',
+            'style'     => 'nullable|string|max:255',
+            'lure'      => 'nullable|string|max:255',
+            'tackle'    => 'nullable|string|max:255',
+            'privacy'   => 'nullable|string|in:all,public,everyone,friends,private',
+            'caught_at' => 'nullable|date',
+            'water_type'=> 'nullable|string|max:255',
+            'water_temp'=> 'nullable|numeric',
+            'wind_speed'=> 'nullable|numeric',
+            'pressure'  => 'nullable|numeric',
+            'companions'=> 'nullable|string|max:255',
+            'notes'     => 'nullable|string',
+            'photo_url' => 'nullable|string|max:255',
         ]);
+
+        $data['privacy'] = $data['privacy'] ?? 'all';
+        $now = now();
+
+        $id = DB::table('catch_records')->insertGetId([
+            'user_id'    => $data['user_id']   ?? null,
+            'lat'        => $data['lat'],
+            'lng'        => $data['lng'],
+            'species'    => $data['species']   ?? null,
+            'length'     => $data['length']    ?? null,
+            'weight'     => $data['weight']    ?? null,
+            'depth'      => $data['depth']     ?? null,
+            'style'      => $data['style']     ?? null,
+            'lure'       => $data['lure']      ?? null,
+            'tackle'     => $data['tackle']    ?? null,
+            'privacy'    => $data['privacy'],
+            'caught_at'  => $data['caught_at'] ?? null,
+            'water_type' => $data['water_type']?? null,
+            'water_temp' => $data['water_temp']?? null,
+            'wind_speed' => $data['wind_speed']?? null,
+            'pressure'   => $data['pressure']  ?? null,
+            'companions' => $data['companions']?? null,
+            'notes'      => $data['notes']     ?? null,
+            'photo_url'  => $data['photo_url'] ?? null,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        $row = DB::table('catch_records')->where('id', $id)->first();
+        return response()->json($row, 201);
+    }
+}
+PHP
+
+# --- PointWriteController ---
+cat > "$BACK/app/Http/Controllers/Api/PointWriteController.php" <<'PHP'
+<?php
+namespace App\Http\Controllers\Api;
+
+use App\Http\Controllers\Controller;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+
+class PointWriteController extends Controller
+{
+    public function store(Request $r)
+    {
+        // fishing_points: id,user_id,lat,lng,title,description,category,is_public,is_highlighted,status,created_at,updated_at
+        $data = $r->validate([
+            'user_id'      => 'nullable|integer|exists:users,id',
+            'lat'          => 'required|numeric',
+            'lng'          => 'required|numeric',
+            'title'        => 'required|string|max:255',
+            'description'  => 'nullable|string',
+            'category'     => 'required|string|in:spot,shop,slip,camp',
+            'is_public'    => 'nullable|boolean',
+            'is_highlighted'=> 'nullable|boolean',
+            'status'       => 'nullable|string|in:approved,pending,rejected',
+        ]);
+
+        $now = now();
+        $id = DB::table('fishing_points')->insertGetId([
+            'user_id'        => $data['user_id'] ?? null,
+            'lat'            => $data['lat'],
+            'lng'            => $data['lng'],
+            'title'          => $data['title'],
+            'description'    => $data['description'] ?? null,
+            'category'       => $data['category'],
+            'is_public'      => array_key_exists('is_public',$data) ? (int)$data['is_public'] : 1,
+            'is_highlighted' => array_key_exists('is_highlighted',$data) ? (int)$data['is_highlighted'] : 0,
+            'status'         => $data['status'] ?? 'approved',
+            'created_at'     => $now,
+            'updated_at'     => $now,
+        ]);
+
+        $row = DB::table('fishing_points')->where('id',$id)->first();
+        return response()->json($row, 201);
     }
 
-    // Публичные комментарии по улову (для отображения списка по клику)
-    public function comments($id, Request $r)
+    public function categories()
     {
-        $limit  = min(max((int)$r->query('limit', 20), 1), 100);
-        $offset = max((int)$r->query('offset', 0), 0);
-
-        $q = DB::table('catch_comments as c')
-            ->leftJoin('users as u','u.id','=','c.user_id')
-            ->where('c.catch_id',$id);
-
-        if (Schema::hasColumn('catch_comments','is_approved')) {
-            $q->where('c.is_approved', 1);
-        }
-
-        $rows = $q->orderBy('c.created_at','asc')
-            ->offset($offset)->limit($limit)
-            ->get([
-                'c.id','c.user_id','u.name as user_name',
-                DB::raw(Schema::hasColumn('users','photo_url') ? 'u.photo_url as user_avatar' : 'NULL as user_avatar'),
-                'c.body','c.created_at'
-            ]);
-
         return response()->json([
-            'items'  => $rows,
-            'limit'  => $limit,
-            'offset' => $offset,
-            'next'   => count($rows)===$limit ? $offset+$limit : null,
+            'items' => ['spot','shop','slip','camp']
         ]);
     }
 }
 PHP
 
-echo "==> Patching routes..."
-
+# --- routes ---
 ROUTES="$BACK/routes/api.php"
-if ! grep -q "FeedController" "$ROUTES"; then
-  # Вставим блок v1/feed и комментарии
+if ! grep -q "CatchWriteController" "$ROUTES"; then
   cat >> "$ROUTES" <<'PHP'
 
-// --- FEED API (safe to schema) ---
-use App\Http\Controllers\Api\FeedController;
+// --- WRITE ENDPOINTS (create catch/place) ---
+use App\Http\Controllers\Api\CatchWriteController;
+use App\Http\Controllers\Api\PointWriteController;
+
 Route::prefix('v1')->group(function () {
-    Route::get('/feed', [FeedController::class,'index']);               // GET /api/v1/feed
-    Route::get('/catches/{id}/comments', [FeedController::class,'comments']); // GET /api/v1/catches/{id}/comments
+    Route::post('/catches', [CatchWriteController::class,'store']); // POST /api/v1/catches
+    Route::post('/points',  [PointWriteController::class,'store']); // POST /api/v1/points
+    Route::get('/points/categories', [PointWriteController::class,'categories']); // справочник
 });
 PHP
 fi
 
-echo "==> Backend done."
+echo "==> Frontend: forms & helpers"
 
-echo "==> Writing frontend files..."
+mkdir -p "$FRONT/src/components" "$FRONT/src/screens" "$FRONT/src/lib"
 
-mkdir -p "$FRONT/src/types" "$FRONT/src/components" "$FRONT/src/screens" "$FRONT/src/lib"
-
-# types
-cat > "$FRONT/src/types/feed.ts" <<'TS'
-export type FeedItem = {
-  id: number;
-  user_id: number | null;
-  user_name?: string | null;
-  user_avatar?: string | null;
-  species?: string | null;
-  length?: number | null;
-  weight?: number | null;
-  style?: string | null;
-  lure?: string | null;
-  tackle?: string | null;
-  notes?: string | null;
-  photo_url?: string | null;
-  lat: number;
-  lng: number;
-  caught_at?: string | null;
-  created_at?: string | null;
-  likes_count: number;
-  comments_count: number;
-  place_title?: string | null;
-};
-TS
-
-# lib/api base
-cat > "$FRONT/src/lib/api.ts" <<'TS'
-export const API_BASE = (import.meta as any).env?.VITE_API_BASE ?? "https://api.fishtrackpro.ru";
-
-export function buildUrl(path: string, params?: Record<string, any>) {
-  const u = new URL(path, API_BASE);
-  if (params) {
-    Object.entries(params).forEach(([k,v]) => {
-      if (v !== undefined && v !== null && v !== '') u.searchParams.set(k, String(v));
-    });
-  }
-  return u.toString();
+# Toast helper
+cat > "$FRONT/src/lib/toast.ts" <<'TS'
+export function toast(msg: string) {
+  const el = document.createElement('div');
+  el.textContent = msg;
+  el.className = 'fixed left-1/2 -translate-x-1/2 bottom-24 px-4 py-2 rounded-full bg-black/70 text-white text-sm z-[1000]';
+  document.body.appendChild(el);
+  setTimeout(()=> el.remove(), 2200);
 }
 TS
 
-# tabs (Global/Local/Follow)
-cat > "$FRONT/src/components/FeedTabs.tsx" <<'TSX'
+# Modal component
+cat > "$FRONT/src/components/Modal.tsx" <<'TSX'
 import React from "react";
 
-type Tab = "global"|"local"|"follow";
-const TABS: {key: Tab; label: string}[] = [
-  {key:"global", label:"Глобально"},
-  {key:"local",  label:"Рядом"},
-  {key:"follow", label:"Подписки"},
-];
-
-export default function FeedTabs({active, onChange}:{active:Tab; onChange:(t:Tab)=>void}) {
+export default function Modal({open, onClose, children, title}:{open:boolean; onClose:()=>void; title?:string; children:React.ReactNode}) {
+  if (!open) return null;
   return (
-    <div className="flex gap-2 p-2 rounded-2xl bg-white/60 backdrop-blur border border-white/60 sticky top-0 z-20">
-      {TABS.map(t => {
-        const is = active===t.key;
-        return (
-          <button
-            key={t.key}
-            onClick={()=>onChange(t.key)}
-            className={
-              "px-3 py-1 rounded-full text-sm " +
-              (is ? "bg-white border border-white shadow font-semibold" : "bg-transparent border border-transparent text-gray-600")
-            }
-            aria-pressed={is}
-          >
-            {t.label}
-          </button>
-        );
-      })}
+    <div className="fixed inset-0 z-50">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose}/>
+      <div className="absolute left-1/2 top-10 -translate-x-1/2 w-[min(640px,95vw)] rounded-2xl bg-white/80 backdrop-blur border border-white/60 shadow-xl p-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold">{title ?? "Форма"}</h3>
+          <button className="px-2 py-1 text-gray-500 hover:text-black" onClick={onClose}>✕</button>
+        </div>
+        <div className="mt-2">{children}</div>
+      </div>
     </div>
   );
 }
 TSX
 
-# card
-cat > "$FRONT/src/components/FeedCard.tsx" <<'TSX'
-import React from "react";
-import type { FeedItem } from "../types/feed";
+# API base (если ещё нет)
+if [ ! -f "$FRONT/src/lib/api.ts" ]; then
+cat > "$FRONT/src/lib/api.ts" <<'TS'
+export const API_BASE = (import.meta as any).env?.VITE_API_BASE ?? "https://api.fishtrackpro.ru";
+export function buildUrl(path: string) { return new URL(path, API_BASE).toString(); }
+TS
+fi
 
-const fallbackAvatar = "data:image/svg+xml;utf8," + encodeURIComponent(
-  `<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64'>
-     <rect width='100%' height='100%' rx='8' ry='8' fill='#e5e7eb'/>
-     <text x='50%' y='54%' text-anchor='middle' font-size='28' fill='#9ca3af'>👤</text>
-   </svg>`
-);
-
-export default function FeedCard({ item }: { item: FeedItem }) {
-  const name = item.user_name || "Аноним";
-  const avatar = item.user_avatar || fallbackAvatar;
-  const when   = item.caught_at || item.created_at || null;
-
-  return (
-    <article className="rounded-2xl p-3 mb-3 bg-white/70 backdrop-blur border border-white/50 shadow-sm">
-      <header className="flex items-center gap-3">
-        <img
-          src={avatar}
-          alt={name}
-          className="w-10 h-10 rounded-full object-cover border border-white/70"
-          onError={(e)=> (e.currentTarget.src = fallbackAvatar)}
-        />
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-gray-900 truncate">{name}</div>
-          <div className="text-xs text-gray-500">
-            {when ? new Date(when).toLocaleString() : ""}
-            {item.place_title ? ` • ${item.place_title}` : ""}
-          </div>
-        </div>
-      </header>
-
-      {item.photo_url && (
-        <div className="mt-3 overflow-hidden rounded-xl">
-          <img src={item.photo_url} alt={item.species ?? "Улов"} className="w-full object-cover max-h-[360px]" />
-        </div>
-      )}
-
-      <div className="mt-3">
-        <div className="text-base font-medium text-gray-900">
-          {item.species ?? (item.notes ? item.notes.slice(0,64) + (item.notes.length>64 ? "…" : "") : "Улов")}
-        </div>
-        <div className="text-sm text-gray-600 flex flex-wrap gap-x-4">
-          {item.weight != null && <span>Вес: {item.weight}</span>}
-          {item.length != null && <span>Длина: {item.length}</span>}
-          {item.style && <span>Стиль: {item.style}</span>}
-          {item.lure && <span>Приманка: {item.lure}</span>}
-        </div>
-      </div>
-
-      <footer className="mt-3 flex items-center gap-4 text-sm text-gray-700">
-        <button className="px-3 py-1 rounded-full bg-white/60 border border-white/60">❤ {item.likes_count ?? 0}</button>
-        <button className="px-3 py-1 rounded-full bg-white/60 border border-white/60">💬 {item.comments_count ?? 0}</button>
-      </footer>
-    </article>
-  );
-}
-TSX
-
-# Feed screen with infinite scroll
-cat > "$FRONT/src/screens/FeedScreen.tsx" <<'TSX'
-import React, { useEffect, useRef, useState } from "react";
-import FeedTabs from "../components/FeedTabs";
-import FeedCard from "../components/FeedCard";
-import type { FeedItem } from "../types/feed";
+# AddCatchScreen
+cat > "$FRONT/src/screens/AddCatchScreen.tsx" <<'TSX'
+import React, { useState } from "react";
 import { buildUrl } from "../lib/api";
+import { toast } from "../lib/toast";
 
-type Tab = "global"|"local"|"follow";
-
-export default function FeedScreen() {
-  const [tab, setTab] = useState<Tab>("global");
-  const [q, setQ] = useState("");
-  const [items, setItems] = useState<FeedItem[]>([]);
-  const [offset, setOffset] = useState(0);
-  const [hasMore, setHasMore] = useState(true);
+export default function AddCatchScreen({onDone}:{onDone:()=>void}) {
+  const [form, setForm] = useState({
+    species: "", length: "", weight: "", style: "", lure: "", tackle: "",
+    notes: "", photo_url: "", lat: "", lng: "", caught_at: "", privacy: "all"
+  });
   const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
-  const geoRef = useRef<{lat:number, lng:number} | null>(null);
+  const [err, setErr] = useState<string|null>(null);
 
-  // reset on tab/q change
-  useEffect(() => {
-    setItems([]); setOffset(0); setHasMore(true); setErr(null);
-  }, [tab, q]);
+  const set = (k: string, v: string) => setForm(p=>({...p, [k]: v}));
 
-  // local tab: get geolocation once
-  useEffect(() => {
-    if (tab !== "local") return;
-    if (geoRef.current) return;
-    if (!navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(
-      (pos) => { geoRef.current = { lat: pos.coords.latitude, lng: pos.coords.longitude }; },
-      () => { geoRef.current = null; },
-      { enableHighAccuracy: true, timeout: 5000 }
-    );
-  }, [tab]);
-
-  // loader
-  useEffect(() => {
-    if (!hasMore || loading) return;
-    const el = sentinelRef.current;
-    if (!el) return;
-    const io = new IntersectionObserver((entries)=>{
-      entries.forEach((e)=>{
-        if (e.isIntersecting) fetchMore();
-      });
-    }, { rootMargin: "300px" });
-    io.observe(el);
-    return () => io.disconnect();
-  }, [hasMore, loading, sentinelRef.current, tab, q]);
-
-  const fetchMore = () => {
-    if (!hasMore || loading) return;
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
     setLoading(true); setErr(null);
-
-    const params: Record<string, any> = { limit: 20, offset, tab, q: q.trim() };
-    if (tab === "local" && geoRef.current) {
-      params.lat = geoRef.current.lat;
-      params.lng = geoRef.current.lng;
-      params.radius_km = 50;
+    try {
+      const payload: any = {
+        lat: Number(form.lat), lng: Number(form.lng),
+        species: form.species || null,
+        length: form.length ? Number(form.length) : null,
+        weight: form.weight ? Number(form.weight) : null,
+        style: form.style || null, lure: form.lure || null, tackle: form.tackle || null,
+        notes: form.notes || null, photo_url: form.photo_url || null,
+        caught_at: form.caught_at || null,
+        privacy: form.privacy || "all",
+      };
+      const res = await fetch(buildUrl("/api/v1/catches"), {
+        method: "POST",
+        headers: { "Content-Type":"application/json", "Accept":"application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      toast("Улов добавлен");
+      onDone();
+    } catch (e:any) {
+      setErr(e.message ?? String(e));
+    } finally {
+      setLoading(false);
     }
-
-    fetch(buildUrl("/api/v1/feed", params), { mode: "cors" })
-      .then(async r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-      .then(json => {
-        const arr: FeedItem[] = Array.isArray(json.items) ? json.items : [];
-        setItems(prev => prev.concat(arr));
-        if (json.next != null) setOffset(json.next); else setHasMore(false);
-      })
-      .catch(e => setErr(e.message))
-      .finally(()=> setLoading(false));
   };
 
   return (
-    <div className="px-3 pt-3 pb-24">
-      <FeedTabs active={tab} onChange={setTab}/>
-      <div className="mt-3 sticky top-[56px] z-10">
-        <input
-          className="w-full rounded-full px-4 py-2 bg-white/60 backdrop-blur border border-white/60"
-          placeholder="Поиск по виду, приманке, снастям, заметкам…"
-          value={q}
-          onChange={(e)=>setQ(e.target.value)}
-        />
+    <form onSubmit={submit} className="space-y-3">
+      <div className="grid grid-cols-2 gap-3">
+        <input className="input" placeholder="Широта (lat)" value={form.lat} onChange={e=>set("lat", e.target.value)} required />
+        <input className="input" placeholder="Долгота (lng)" value={form.lng} onChange={e=>set("lng", e.target.value)} required />
       </div>
-
-      <div className="mt-3">
-        {items.map(it => <FeedCard key={it.id} item={it} />)}
+      <div className="grid grid-cols-2 gap-3">
+        <input className="input" placeholder="Вид рыбы" value={form.species} onChange={e=>set("species", e.target.value)} />
+        <input className="input" placeholder="Вес (кг)" value={form.weight} onChange={e=>set("weight", e.target.value)} />
       </div>
+      <div className="grid grid-cols-2 gap-3">
+        <input className="input" placeholder="Длина (см)" value={form.length} onChange={e=>set("length", e.target.value)} />
+        <input className="input" placeholder="Стиль" value={form.style} onChange={e=>set("style", e.target.value)} />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <input className="input" placeholder="Приманка" value={form.lure} onChange={e=>set("lure", e.target.value)} />
+        <input className="input" placeholder="Снасти" value={form.tackle} onChange={e=>set("tackle", e.target.value)} />
+      </div>
+      <input className="input" placeholder="Фото (URL)" value={form.photo_url} onChange={e=>set("photo_url", e.target.value)} />
+      <input className="input" type="datetime-local" placeholder="Дата/время" value={form.caught_at} onChange={e=>set("caught_at", e.target.value)} />
+      <select className="input" value={form.privacy} onChange={e=>set("privacy", e.target.value)}>
+        <option value="all">Публично</option>
+        <option value="friends">Друзья</option>
+        <option value="private">Приватно</option>
+      </select>
+      <textarea className="input" placeholder="Заметки" value={form.notes} onChange={e=>set("notes", e.target.value)} />
+      {err && <div className="text-red-500 text-sm">{err}</div>}
+      <div className="flex gap-2 justify-end">
+        <button type="button" className="btn-secondary" onClick={onDone}>Отмена</button>
+        <button type="submit" className="btn-primary" disabled={loading}>{loading?"Сохранение…":"Сохранить"}</button>
+      </div>
+    </form>
+  );
+}
+TSX
 
-      {err && <div className="text-center text-red-500 py-4">Ошибка: {err}</div>}
-      {loading && <div className="text-center text-gray-500 py-4">Загрузка…</div>}
-      {!loading && !err && items.length===0 && !hasMore && (
-        <div className="text-center text-gray-500 py-6">Публикаций пока нет</div>
-      )}
+# AddPlaceScreen
+cat > "$FRONT/src/screens/AddPlaceScreen.tsx" <<'TSX'
+import React, { useEffect, useState } from "react";
+import { buildUrl } from "../lib/api";
+import { toast } from "../lib/toast";
 
-      <div ref={sentinelRef} className="h-6" />
+export default function AddPlaceScreen({onDone}:{onDone:()=>void}) {
+  const [cats, setCats] = useState<string[]>(["spot","shop","slip","camp"]);
+  const [form, setForm] = useState({
+    title:"", description:"", category:"spot", lat:"", lng:"",
+    is_public:true, is_highlighted:false
+  });
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string|null>(null);
+
+  useEffect(() => {
+    fetch(buildUrl("/api/v1/points/categories"))
+      .then(r => r.ok ? r.json(): Promise.reject(r.status))
+      .then(j => Array.isArray(j.items) ? setCats(j.items) : null)
+      .catch(()=>{ /* необязательно */ });
+  }, []);
+
+  const set = (k: string, v: any) => setForm(p=>({...p, [k]: v}));
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true); setErr(null);
+    try {
+      const payload: any = {
+        title: form.title,
+        description: form.description || null,
+        category: form.category,
+        lat: Number(form.lat), lng: Number(form.lng),
+        is_public: !!form.is_public,
+        is_highlighted: !!form.is_highlighted,
+        status: 'approved',
+      };
+      const res = await fetch(buildUrl("/api/v1/points"), {
+        method: "POST",
+        headers: { "Content-Type":"application/json", "Accept":"application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      toast("Место добавлено");
+      onDone();
+    } catch (e:any) {
+      setErr(e.message ?? String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} className="space-y-3">
+      <input className="input" placeholder="Название" value={form.title} onChange={e=>set("title", e.target.value)} required />
+      <textarea className="input" placeholder="Описание" value={form.description} onChange={e=>set("description", e.target.value)} />
+      <div className="grid grid-cols-2 gap-3">
+        <input className="input" placeholder="Широта (lat)" value={form.lat} onChange={e=>set("lat", e.target.value)} required />
+        <input className="input" placeholder="Долгота (lng)" value={form.lng} onChange={e=>set("lng", e.target.value)} required />
+      </div>
+      <select className="input" value={form.category} onChange={e=>set("category", e.target.value)}>
+        {cats.map(c => <option key={c} value={c}>{c}</option>)}
+      </select>
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={form.is_public} onChange={e=>set("is_public", e.target.checked)} />
+        Публично
+      </label>
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={form.is_highlighted} onChange={e=>set("is_highlighted", e.target.checked)} />
+        Выделить на карте
+      </label>
+      {err && <div className="text-red-500 text-sm">{err}</div>}
+      <div className="flex gap-2 justify-end">
+        <button type="button" className="btn-secondary" onClick={onDone}>Отмена</button>
+        <button type="submit" className="btn-primary" disabled={loading}>{loading?"Сохранение…":"Сохранить"}</button>
+      </div>
+    </form>
+  );
+}
+TSX
+
+# Tailwind-ish utility classes used in forms (scoped via global.css)
+mkdir -p "$FRONT/src/styles"
+if ! grep -q ".input" "$FRONT/src/styles/forms.css" 2>/dev/null; then
+cat > "$FRONT/src/styles/forms.css" <<'CSS'
+.input { @apply w-full rounded-xl px-3 py-2 bg-white/70 backdrop-blur border border-white/60 outline-none; }
+.btn-primary { @apply rounded-full px-4 py-2 bg-black text-white; }
+.btn-secondary { @apply rounded-full px-4 py-2 bg-white/70 border border-white/60; }
+CSS
+fi
+
+# Ensure import of forms.css in main css (if you use Tailwind index.css, append safe)
+CSS_ENTRY="$FRONT/src/index.css"
+if [ -f "$CSS_ENTRY" ] && ! grep -q "styles/forms.css" "$CSS_ENTRY"; then
+  echo '@import "./styles/forms.css";' >> "$CSS_ENTRY"
+fi
+
+# Patch App.tsx safely (backup then write a minimal version that wires FAB -> chooser -> modal forms)
+APP="$FRONT/src/App.tsx"
+if [ -f "$APP" ]; then cp "$APP" "$APP.bak.$(date +%s)"; fi
+
+cat > "$FRONT/src/App.tsx" <<'TSX'
+import React, { useMemo, useState } from "react";
+import MapScreen from "./screens/MapScreen";
+import FeedScreen from "./screens/FeedScreen";
+import ProfileScreen from "./screens/ProfileScreen";
+import AuthScreen from "./screens/AuthScreen";
+import BottomNav from "./components/BottomNav";
+import AddCatchScreen from "./screens/AddCatchScreen";
+import AddPlaceScreen from "./screens/AddPlaceScreen";
+import Modal from "./components/Modal";
+import { useAuthState } from "./data/auth";
+
+type Tab="map"|"feed"|"alerts"|"profile";
+type FormKind = null | "catch" | "place" | "chooser";
+
+export default function App(){
+  const [tab,setTab]=useState<Tab>("map");
+  const {isAuthed}=useAuthState?.() ?? {isAuthed:false};
+  const needAuth=useMemo(()=> (tab==="feed"||tab==="profile") && !isAuthed, [tab,isAuthed]);
+  const [form,setForm]=useState<FormKind>(null);
+
+  const onFab=()=>{
+    // Показываем селектор: Добавить улов / Добавить место
+    setForm("chooser");
+  };
+
+  const closeAll = ()=> setForm(null);
+
+  return (
+    <div className="relative w-full h-screen bg-gray-100">
+      {tab==="map" && <MapScreen/>}
+      {tab==="feed" && <FeedScreen/>}
+      {tab==="alerts" && <div className="flex items-center justify-center w-full h-full text-gray-600">Уведомления скоро будут</div>}
+      {tab==="profile" && <ProfileScreen/>}
+
+      <BottomNav onFab={onFab} active={tab} onChange={setTab as any}/>
+
+      {needAuth && <AuthScreen onClose={()=>setTab("map")}/>}
+
+      {/* Выбор действия FAB */}
+      <Modal open={form==="chooser"} onClose={closeAll} title="Что добавить?">
+        <div className="grid sm:grid-cols-2 gap-3">
+          <button className="btn-primary" onClick={()=>setForm("catch")}>🎣 Улов</button>
+          <button className="btn-secondary" onClick={()=>setForm("place")}>📍 Место</button>
+        </div>
+      </Modal>
+
+      {/* Форма улова */}
+      <Modal open={form==="catch"} onClose={closeAll} title="Добавить улов">
+        <AddCatchScreen onDone={closeAll}/>
+      </Modal>
+
+      {/* Форма места */}
+      <Modal open={form==="place"} onClose={closeAll} title="Добавить место">
+        <AddPlaceScreen onDone={closeAll}/>
+      </Modal>
     </div>
   );
 }
 TSX
 
-echo "==> Frontend files written."
+echo "==> Done."
 
-echo "----------------------------------------------------"
-echo "NEXT STEPS:"
-echo "1) Backend: php artisan route:clear && php artisan config:clear"
-echo "   Проверка: curl -s \"https://api.fishtrackpro.ru/api/v1/feed?limit=2\" | jq ."
-echo "2) Frontend: в .env.production установите VITE_API_BASE=https://api.fishtrackpro.ru"
-echo "   Соберите и задеплойте фронт, обновите кэш браузера."
-echo "3) CORS: проверьте config/cors.php -> allowed_origins содержит ваш фронт-домен."
-echo "4) Готово. Откройте ленту во фронте — бесконечная прокрутка + табы."
-echo "----------------------------------------------------"
+echo
+echo "Next steps:"
+echo "  1) Backend: php artisan route:clear && php artisan config:clear"
+echo "     Проверка POST (пример):"
+echo "     curl -i -H 'Content-Type: application/json' -d '{\"lat\":55.75,\"lng\":37.62,\"species\":\"Окунь\"}' https://api.fishtrackpro.ru/api/v1/catches"
+echo "     curl -i -H 'Content-Type: application/json' -d '{\"title\":\"Пирс\",\"category\":\"spot\",\"lat\":55.75,\"lng\":37.62}' https://api.fishtrackpro.ru/api/v1/points"
+echo "  2) Frontend: убедитесь, что VITE_API_BASE=https://api.fishtrackpro.ru и соберите фронт."
+echo "  3) Обновите страницу. FAB -> выбор -> форма."
