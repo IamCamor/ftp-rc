@@ -6,6 +6,8 @@ import AuthScreen from "./screens/AuthScreen";
 import BottomNav from "./components/BottomNav";
 import { useAuthState } from "./data/auth";
 type Tab="map"|"feed"|"alerts"|"profile";
+import FeedPage from './pages/FeedPage';
+<Route path="/feed" element={<FeedPage/>} />
 export default function App(){
   const [tab,setTab]=useState<Tab>("map"); const {isAuthed}=useAuthState();
   const needAuth=useMemo(()=> (tab==="feed"||tab==="profile") && !isAuthed, [tab,isAuthed]);
@@ -14,7 +16,7 @@ export default function App(){
     <div className="relative w-full h-screen bg-gray-100">
       {tab==="map" && <MapScreen/>}
       {tab==="feed" && <FeedScreen/>}
-      {tab==="alerts" && <div className="w-full h-full flex items-center justify-center text-gray-600">Уведомления скоро будут</div>}
+      {tab==="alerts" && <div className="flex items-center justify-center w-full h-full text-gray-600">Уведомления скоро будут</div>}
       {tab==="profile" && <ProfileScreen/>}
       <BottomNav onFab={onFab} active={tab} onChange={setTab as any}/>
       {needAuth && <AuthScreen onClose={()=>setTab("map")}/>}

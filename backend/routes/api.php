@@ -3,10 +3,21 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\{HealthController,UploadController,MapController,CatchesController,BonusController};
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ProfileController;
+use App\Http\Controllers\Api\FeedController;
 
 Route::get('/health',[HealthController::class,'ping']);
 
 Route::prefix('v1')->group(function(){
+
+Route::get('/feed', [FeedController::class, 'index']);                  // публичная лента
+Route::get('/feed/{id}/comments', [FeedController::class, 'comments']); // публичные комменты к улову
+
+// действия, когда подключишь авторизацию (Sanctum/JWT):
+Route::middleware('auth:sanctum')->group(function () {
+    Route::post('/feed/{id}/like', [FeedController::class, 'like']);
+    Route::delete('/feed/{id}/like', [FeedController::class, 'unlike']);
+    Route::post('/feed/{id}/comments', [FeedController::class, 'addComment']);
+});
   // загрузка фото
   Route::post('/upload/image',[UploadController::class,'image']);
 
@@ -45,4 +56,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/bonus/redeem-pro', [BonusController::class, 'redeemPro']);
 });
 /* === /Bonus System Routes === */
+
+
+
 
