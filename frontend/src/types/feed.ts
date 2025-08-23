@@ -17,4 +17,5 @@ export type FeedItem = {
   created_at?: string | null;
   likes_count: number;
   comments_count: number;
+  place_title?: string | null;
 };
