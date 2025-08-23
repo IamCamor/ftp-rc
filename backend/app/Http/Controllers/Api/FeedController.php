@@ -47,6 +47,14 @@ class FeedController extends Controller
             // privacy = 'all' (в вашей таблице дефолт 'all')
             $q->where('catch_records.privacy', '=', 'all');
 
+            if (\Illuminate\Support\Facades\Schema::hasColumn('users', 'avatar')) {
+             $q->addSelect('users.avatar as user_avatar');
+} elseif (\Illuminate\Support\Facades\Schema::hasColumn('users', 'photo_url')) {
+    $q->addSelect('users.photo_url as user_avatar');
+} else {
+    $q->addSelect(\Illuminate\Support\Facades\DB::raw('NULL as user_avatar'));
+}
+
             // Присоединим имя пользователя, если оно есть
             if (Schema::hasColumn('users', 'name')) {
                 $q->leftJoin('users', 'users.id', '=', 'catch_records.user_id')

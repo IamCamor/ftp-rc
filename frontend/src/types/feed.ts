@@ -1,0 +1,20 @@
+export type FeedItem = {
+  id: number;
+  user_id: number | null;
+  user_name?: string | null;
+  user_avatar?: string | null;
+  species?: string | null;
+  length?: number | null;
+  weight?: number | null;
+  style?: string | null;
+  lure?: string | null;
+  tackle?: string | null;
+  notes?: string | null;
+  photo_url?: string | null;
+  lat: number;
+  lng: number;
+  caught_at?: string | null;
+  created_at?: string | null;
+  likes_count: number;
+  comments_count: number;
+};

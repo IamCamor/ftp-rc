@@ -1,57 +1,61 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
+import FeedCard from "../components/FeedCard";
+import type { FeedItem } from "../types/feed";
 
-type Post = {
-  id: number;
-  user: { name: string; avatar?: string };
-  text: string;
-  photo?: string;
-  created_at: string;
-};
+const API = import.meta.env.VITE_API_BASE ?? "https://api.fishtrackpro.ru";
 
 export default function FeedScreen() {
-  const [posts, setPosts] = useState<Post[]>([]);
+  const [items, setItems] = useState<FeedItem[]>([]);
+  const [q, setQ] = useState("");
   const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("https://api.fishtrackpro.ru/api/v1/feed?limit=20")
-      .then(r => r.json())
-      .then(data => {
-        setPosts(data.items || []);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, []);
+    let abort = false;
+    setLoading(true);
+    setErr(null);
 
-  if (loading) return <div className="flex items-center justify-center h-full">Загрузка...</div>;
+    const url = new URL("/api/v1/feed", API);
+    url.searchParams.set("limit", "20");
+    if (q.trim()) url.searchParams.set("q", q.trim());
+
+    fetch(url.toString(), { credentials: "omit" })
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((json) => {
+        if (!abort) setItems(Array.isArray(json.items) ? json.items : []);
+      })
+      .catch((e) => !abort && setErr(e.message))
+      .finally(() => !abort && setLoading(false));
+
+    return () => {
+      abort = true;
+    };
+  }, [q]);
 
   return (
-    <div className="h-full pb-16 overflow-y-auto">
-      {posts.map(post => (
-        <div key={post.id} className="p-4 border-b border-gray-200 bg-white/70 backdrop-blur-sm">
-          <div className="flex items-center gap-3 mb-2">
-            <img
-              src={post.user.avatar || "/avatar-placeholder.png"}
-              alt={post.user.name}
-              className="w-10 h-10 rounded-full"
-            />
-            <div>
-              <div className="font-semibold">{post.user.name}</div>
-              <div className="text-xs text-gray-500">
-                {new Date(post.created_at).toLocaleString()}
-              </div>
-            </div>
-          </div>
-          <div className="mb-2 text-gray-800">{post.text}</div>
-          {post.photo && (
-            <img
-              src={post.photo}
-              alt="post"
-              className="object-cover w-full rounded-xl"
-            />
-          )}
-        </div>
+    <div className="px-3 pt-3 pb-20">
+      <div className="sticky top-0 z-20 mb-3">
+        <input
+          className="w-full px-4 py-2 border rounded-full bg-white/60 backdrop-blur border-white/60"
+          placeholder="Поиск по виду, приманке, заметкам…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+      </div>
+
+      {loading && <div className="py-6 text-center text-gray-500">Загрузка…</div>}
+      {err && <div className="py-6 text-center text-red-500">Ошибка: {err}</div>}
+
+      {items.map((it) => (
+        <FeedCard key={it.id} item={it} />
       ))}
-      {posts.length === 0 && <div className="p-4 text-center text-gray-500">Нет публикаций</div>}
+
+      {!loading && !err && items.length === 0 && (
+        <div className="py-6 text-center text-gray-500">Публикаций пока нет</div>
+      )}
     </div>
   );
 }
