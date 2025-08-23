@@ -1,98 +1,100 @@
-import React, { useEffect, useRef, useState } from "react";
-import FeedTabs from "../components/FeedTabs";
-import FeedCard from "../components/FeedCard";
-import type { FeedItem } from "../types/feed";
-import { buildUrl } from "../lib/api";
+import React,{useEffect,useRef,useState} from "react";
+import {api} from "../lib/api";
+import {toast} from "../lib/toast";
 
-type Tab = "global"|"local"|"follow";
+type FeedItem = {
+  id:number,user_id:number,user_name:string,user_avatar?:string|null,
+  lat:number,lng:number,species?:string|null,length?:number|null,weight?:number|null,
+  notes?:string|null,photo_url?:string|null, created_at:string,
+  likes_count:number, comments_count:number
+};
+export default function FeedScreen({placeId}:{placeId?:number}){
+  const [items,setItems]=useState<FeedItem[]>([]);
+  const [loading,setLoading]=useState(false);
+  const [offset,setOffset]=useState(0);
+  const doneRef=useRef(false);
 
-export default function FeedScreen() {
-  const [tab, setTab] = useState<Tab>("global");
-  const [q, setQ] = useState("");
-  const [items, setItems] = useState<FeedItem[]>([]);
-  const [offset, setOffset] = useState(0);
-  const [hasMore, setHasMore] = useState(true);
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
-  const geoRef = useRef<{lat:number, lng:number} | null>(null);
-
-  // reset on tab/q change
-  useEffect(() => {
-    setItems([]); setOffset(0); setHasMore(true); setErr(null);
-  }, [tab, q]);
-
-  // local tab: get geolocation once
-  useEffect(() => {
-    if (tab !== "local") return;
-    if (geoRef.current) return;
-    if (!navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(
-      (pos) => { geoRef.current = { lat: pos.coords.latitude, lng: pos.coords.longitude }; },
-      () => { geoRef.current = null; },
-      { enableHighAccuracy: true, timeout: 5000 }
-    );
-  }, [tab]);
-
-  // loader
-  useEffect(() => {
-    if (!hasMore || loading) return;
-    const el = sentinelRef.current;
-    if (!el) return;
-    const io = new IntersectionObserver((entries)=>{
-      entries.forEach((e)=>{
-        if (e.isIntersecting) fetchMore();
-      });
-    }, { rootMargin: "300px" });
-    io.observe(el);
-    return () => io.disconnect();
-  }, [hasMore, loading, sentinelRef.current, tab, q]);
-
-  const fetchMore = () => {
-    if (!hasMore || loading) return;
-    setLoading(true); setErr(null);
-
-    const params: Record<string, any> = { limit: 20, offset, tab, q: q.trim() };
-    if (tab === "local" && geoRef.current) {
-      params.lat = geoRef.current.lat;
-      params.lng = geoRef.current.lng;
-      params.radius_km = 50;
-    }
-
-    fetch(buildUrl("/api/v1/feed", params), { mode: "cors" })
-      .then(async r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-      .then(json => {
-        const arr: FeedItem[] = Array.isArray(json.items) ? json.items : [];
-        setItems(prev => prev.concat(arr));
-        if (json.next != null) setOffset(json.next); else setHasMore(false);
-      })
-      .catch(e => setErr(e.message))
-      .finally(()=> setLoading(false));
+  const load=async()=>{
+    if(loading||doneRef.current) return; setLoading(true);
+    try{
+      const q:any={limit:20,offset};
+      if(placeId) q.place_id=placeId;
+      const j:any=await api.feed(q);
+      const next=j.next_offset ?? (offset+(j.items?.length||0));
+      setItems(prev=>[...prev,...(j.items||[])]);
+      setOffset(next);
+      if(!j.items || j.items.length===0) doneRef.current=true;
+    }catch{ toast('Ошибка загрузки ленты'); }
+    finally{ setLoading(false); }
   };
 
-  return (
-    <div className="px-3 pt-3 pb-24">
-      <FeedTabs active={tab} onChange={setTab}/>
-      <div className="mt-3 sticky top-[56px] z-10">
-        <input
-          className="w-full rounded-full px-4 py-2 bg-white/60 backdrop-blur border border-white/60"
-          placeholder="Поиск по виду, приманке, снастям, заметкам…"
-          value={q}
-          onChange={(e)=>setQ(e.target.value)}
-        />
+  useEffect(()=>{ // init
+    setItems([]); setOffset(0); doneRef.current=false; load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[placeId]);
+
+  useEffect(()=>{ // inf scroll
+    const onScroll=()=>{
+      if((window.innerHeight+window.scrollY)>=document.body.offsetHeight-400) load();
+    };
+    window.addEventListener('scroll',onScroll); return ()=>window.removeEventListener('scroll',onScroll);
+  },[load]);
+
+  return <div className="p-3 pb-28 max-w-2xl mx-auto space-y-3">
+    {items.map(it=><div key={it.id} className="rounded-2xl bg-white/70 backdrop-blur border border-white/60 shadow-md overflow-hidden">
+      <div className="flex items-center gap-3 px-4 py-3">
+        <img src={it.user_avatar||'/avatar.svg'} className="w-9 h-9 rounded-full object-cover" onError={(e:any)=>e.currentTarget.src='/avatar.svg'}/>
+        <div className="flex-1">
+          <div className="font-medium cursor-pointer" onClick={()=>location.hash=`#/u/${it.user_id}`}>{it.user_name||'Рыбак'}</div>
+          <div className="text-xs text-gray-500">{new Date(it.created_at).toLocaleString()}</div>
+        </div>
+        <button className="text-sm text-gray-600" onClick={()=>shareCatch(it.id)}>Поделиться</button>
       </div>
-
-      <div className="mt-3">
-        {items.map(it => <FeedCard key={it.id} item={it} />)}
+      {it.photo_url && <img src={it.photo_url} className="w-full max-h-[60vh] object-cover" />}
+      <div className="px-4 py-3 text-sm space-y-2">
+        <div className="flex flex-wrap gap-3">
+          {it.species && <span className="px-3 py-1 rounded-full border cursor-pointer" onClick={()=>location.hash=`#/?species=${encodeURIComponent(it.species!)}`}>🐟 {it.species}</span>}
+          <span className="px-3 py-1 rounded-full border cursor-pointer" onClick={()=>openNearby(it.lat,it.lng)}>📍 место</span>
+        </div>
+        {it.notes && <div>{it.notes}</div>}
+        <div className="flex items-center justify-between pt-2 text-sm text-gray-700">
+          <div className="flex items-center gap-4">
+            <button onClick={()=>like(it.id)} title="Нравится">❤️ {it.likes_count}</button>
+            <button onClick={()=>location.hash=`#/catch/${it.id}`} title="Комментарии">💬 {it.comments_count}</button>
+          </div>
+          <div className="flex items-center gap-4">
+            <button onClick={()=>follow(it.user_id)}>➕ Подписаться</button>
+            <button onClick={()=>report(it.id)} className="text-red-600">Пожаловаться</button>
+          </div>
+        </div>
       </div>
+    </div>)}
+    {loading && <div className="text-center text-gray-500 py-6">Загрузка…</div>}
+    {!loading && items.length===0 && <div className="text-center text-gray-500 py-12">Пока пусто</div>}
+  </div>;
+}
 
-      {err && <div className="text-center text-red-500 py-4">Ошибка: {err}</div>}
-      {loading && <div className="text-center text-gray-500 py-4">Загрузка…</div>}
-      {!loading && !err && items.length===0 && !hasMore && (
-        <div className="text-center text-gray-500 py-6">Публикаций пока нет</div>
-      )}
+function shareCatch(id:number){
+  const link = `${location.origin}/#/catch/${id}`;
+  if((navigator as any).share) (navigator as any).share({title:'Улов',url:link});
+  else navigator.clipboard?.writeText(link);
+}
 
-      <div ref={sentinelRef} className="h-6" />
-    </div>
-  );
+async function like(id:number){
+  try{ await fetch(`${(import.meta as any).env?.VITE_API_BASE||'https://api.fishtrackpro.ru'}/api/v1/catch/${id}/like`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:1})}); }catch{}
+  location.hash=`#/catch/${id}`; // откроем деталь (для честного пересчёта)
+}
+
+async function report(id:number){
+  alert('Жалоба отправлена (демо)');
+}
+
+async function follow(uid:number){
+  try{ await fetch(`${(import.meta as any).env?.VITE_API_BASE||'https://api.fishtrackpro.ru'}/api/v1/follow/${uid}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:1})}); }catch{}
+  alert('Готово');
+}
+
+function openNearby(lat:number,lng:number){
+  // эмулируем переход к ленте по ближайшему месту: передадим координаты в хэше
+  location.hash=`#/feed?near=${lat.toFixed(5)},${lng.toFixed(5)}`;
 }

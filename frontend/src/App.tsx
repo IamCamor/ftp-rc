@@ -1,52 +1,42 @@
-import React, { useMemo, useState } from "react";
+import React,{useEffect,useState} from "react";
 import MapScreen from "./screens/MapScreen";
 import FeedScreen from "./screens/FeedScreen";
-import ProfileScreen from "./screens/ProfileScreen";
-import AuthScreen from "./screens/AuthScreen";
+import AddCatchPage from "./screens/AddCatchPage";
+import AddPlacePage from "./screens/AddPlacePage";
+import CatchDetailPage from "./screens/CatchDetailPage";
 import BottomNav from "./components/BottomNav";
-import AddCatchScreen from "./screens/AddCatchScreen";
-import AddPlaceScreen from "./screens/AddPlaceScreen";
-import Modal from "./components/Modal";
-import { useAuthState } from "./data/auth";
 
-type Tab="map"|"feed"|"alerts"|"profile";
-type FormKind = null | "catch" | "place" | "chooser";
+type Route = {path:string, params:Record<string,string>};
+
+function parseHash():Route{
+  const h=location.hash.replace(/^#\/?/,''); // e.g. "catch/12?x=1"
+  const [pathPart, qs] = h.split('?');
+  const params:Object = Object.fromEntries(new URLSearchParams(qs||'').entries());
+  return {path: pathPart||'', params: params as any};
+}
 
 export default function App(){
-  const [tab,setTab]=useState<Tab>("map");
-  const {isAuthed}=useAuthState?.() ?? {isAuthed:false};
-  const needAuth=useMemo(()=> (tab==="feed"||tab==="profile") && !isAuthed, [tab,isAuthed]);
-  const [form,setForm]=useState<FormKind>(null);
+  const [route,setRoute]=useState<Route>(parseHash());
+  useEffect(()=>{ const onHash=()=>setRoute(parseHash()); window.addEventListener('hashchange',onHash); return ()=>window.removeEventListener('hashchange',onHash);},[]);
 
-  const onFab=()=> setForm("chooser");
-  const closeAll = ()=> setForm(null);
+  const activeTab = route.path.startsWith('feed') ? 'feed' : route.path==='' ? 'map' : route.path.startsWith('profile') ? 'profile' : 'map';
 
-  return (
-    <div className="relative w-full h-screen bg-gray-100">
-      {tab==="map" && <MapScreen/>}
-      {tab==="feed" && <FeedScreen/>}
-      {tab==="alerts" && <div className="flex items-center justify-center w-full h-full text-gray-600">Уведомления скоро будут</div>}
-      {tab==="profile" && <ProfileScreen/>}
+  let page:any=null;
+  if(route.path==='') page=<MapScreen/>;
+  else if(route.path.startsWith('feed')) page=<FeedScreen/>;
+  else if(route.path.startsWith('add/catch')) page=<AddCatchPage/>;
+  else if(route.path.startsWith('add/place')) page=<AddPlacePage/>;
+  else if(route.path.startsWith('catch/')){
+    const id=parseInt(route.path.split('/')[1]||'0',10); page=<CatchDetailPage id={id}/>;
+  } else page=<MapScreen/>;
 
-      <BottomNav onFab={onFab} active={tab} onChange={setTab as any}/>
-
-      {needAuth && <AuthScreen onClose={()=>setTab("map")}/>}
-
-      {/* Выбор действия FAB */}
-      <Modal open={form==="chooser"} onClose={closeAll} title="Что добавить?">
-        <div className="grid sm:grid-cols-2 gap-3">
-          <button className="rounded-full px-4 py-2 bg-black text-white" onClick={()=>setForm("catch")}>🎣 Улов</button>
-          <button className="rounded-full px-4 py-2 bg-white/70 border border-white/60" onClick={()=>setForm("place")}>📍 Место</button>
-        </div>
-      </Modal>
-
-      {/* Формы */}
-      <Modal open={form==="catch"} onClose={closeAll} title="Добавить улов">
-        <AddCatchScreen onDone={closeAll}/>
-      </Modal>
-      <Modal open={form==="place"} onClose={closeAll} title="Добавить место">
-        <AddPlaceScreen onDone={closeAll}/>
-      </Modal>
-    </div>
-  );
+  return <div className="w-full h-screen bg-gray-100">
+    {page}
+    <BottomNav onFab={()=>{ location.hash="#/add/catch"; }} active={activeTab as any} onChange={(t:any)=>{
+      if(t==='map') location.hash='#/';
+      else if(t==='feed') location.hash='#/feed';
+      else if(t==='profile') location.hash='#/profile';
+      else location.hash='#/';
+    }}/>
+  </div>;
 }

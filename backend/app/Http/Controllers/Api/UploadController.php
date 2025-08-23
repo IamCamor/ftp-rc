@@ -9,17 +9,15 @@ class UploadController extends Controller
 {
     public function store(Request $r)
     {
-        $r->validate([
-            'file' => 'required|file|max:' . (int) env('FILES_UPLOAD_MAX', 10485760), // 10MB default
-        ]);
-        $file = $r->file('file');
-        $ext  = strtolower($file->getClientOriginalExtension());
-        $isVideo = in_array($ext, ['mp4','mov','webm','mkv']);
-        $path = $file->store($isVideo ? 'uploads/videos' : 'uploads/photos', 'public');
+        $r->validate(['file'=>'required|file|max:'.(int)env('FILES_UPLOAD_MAX',10485760)]);
+        $f = $r->file('file');
+        $ext = strtolower($f->getClientOriginalExtension());
+        $isVideo = in_array($ext,['mp4','mov','webm','mkv']);
+        $path = $f->store($isVideo?'uploads/videos':'uploads/photos','public');
         return response()->json([
-            'ok' => true,
-            'url' => Storage::disk('public')->url($path),
-            'type' => $isVideo ? 'video' : 'image',
+            'ok'=>true,
+            'url'=>Storage::disk('public')->url($path),
+            'type'=>$isVideo?'video':'image'
         ]);
     }
 }
