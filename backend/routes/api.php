@@ -11,6 +11,11 @@ use App\Http\Controllers\Api\CatchController;
 use App\Http\Controllers\Api\CommentController;
 use App\Http\Controllers\Api\LikeController;
 use App\Http\Controllers\Api\FollowController;
+use App\Http\Controllers\Api\ReferralController;
+
+use App\Http\Controllers\Api\MapController;
+use App\Http\Controllers\Api\WeatherController;
+use App\Http\Controllers\Api\CatchesController;
 
 Route::get('/health', fn()=>response()->json(['ok'=>true,'ts'=>now()]));
 
@@ -34,13 +39,7 @@ Route::prefix('v1')->group(function () {
     Route::post('/catch/{id}/comments',[CommentController::class,'store']);
     Route::post('/catch/{id}/like',[LikeController::class,'toggle']);
     Route::post('/follow/{userId}',[FollowController::class,'toggle']);
-});
 
-/* ==== Bonus Points API (S1–S3) ==== */
-use App\Http\Controllers\Api\PointsController;
-use App\Http\Controllers\Api\ReferralController;
-
-Route::prefix('v1')->group(function () {
     Route::middleware('auth:sanctum')->group(function () {
         Route::get('points/me', [PointsController::class, 'me']);
         Route::get('points/ledger', [PointsController::class, 'ledger']);
@@ -48,4 +47,20 @@ Route::prefix('v1')->group(function () {
         Route::get('referral/code', [ReferralController::class, 'myCode']);
         Route::post('referral/link', [ReferralController::class, 'link']); // body: {code}
     });
+
+    // Карта
+    Route::get('/map/points', [MapController::class, 'index']);
+    Route::post('/map/points', [MapController::class, 'store']);            // если нужно
+    Route::get('/map/points/{id}', [MapController::class, 'show']);
+
+    // Уловы (минимум чтение для гостя)
+    Route::get('/catches', [CatchesController::class, 'index']);
+    Route::get('/catches/{id}', [CatchesController::class, 'show']);
+    // Route::post('/catches', [CatchesController::class, 'store']);        // если уже включали
+
+    // Загрузка медиа
+    Route::post('/upload', [UploadController::class, 'store']);
 });
+
+
+
