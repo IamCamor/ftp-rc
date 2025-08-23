@@ -18,7 +18,11 @@ export default function App(){
   const needAuth=useMemo(()=> (tab==="feed"||tab==="profile") && !isAuthed, [tab,isAuthed]);
   const [form,setForm]=useState<FormKind>(null);
 
-  const onFab=()=> setForm("chooser");
+  const onFab=()=>{
+    // Показываем селектор: Добавить улов / Добавить место
+    setForm("chooser");
+  };
+
   const closeAll = ()=> setForm(null);
 
   return (
@@ -35,15 +39,17 @@ export default function App(){
       {/* Выбор действия FAB */}
       <Modal open={form==="chooser"} onClose={closeAll} title="Что добавить?">
         <div className="grid sm:grid-cols-2 gap-3">
-          <button className="rounded-full px-4 py-2 bg-black text-white" onClick={()=>setForm("catch")}>🎣 Улов</button>
-          <button className="rounded-full px-4 py-2 bg-white/70 border border-white/60" onClick={()=>setForm("place")}>📍 Место</button>
+          <button className="btn-primary" onClick={()=>setForm("catch")}>🎣 Улов</button>
+          <button className="btn-secondary" onClick={()=>setForm("place")}>📍 Место</button>
         </div>
       </Modal>
 
-      {/* Формы */}
+      {/* Форма улова */}
       <Modal open={form==="catch"} onClose={closeAll} title="Добавить улов">
         <AddCatchScreen onDone={closeAll}/>
       </Modal>
+
+      {/* Форма места */}
       <Modal open={form==="place"} onClose={closeAll} title="Добавить место">
         <AddPlaceScreen onDone={closeAll}/>
       </Modal>

@@ -1,77 +1,120 @@
-import React, { useState } from "react";
-import { buildUrl } from "../lib/api";
+import React, { useEffect, useMemo, useState } from "react";
+import { Card, CardContent, Button, Input, Textarea, Select } from "../components/ui";
+import Uploader from "../components/Uploader";
+import MapPicker from "../components/map/MapPicker";
+import { apiGet, apiPostJSON } from "../lib/api";
 import { toast } from "../lib/toast";
 
 export default function AddCatchScreen({onDone}:{onDone:()=>void}) {
   const [form, setForm] = useState({
-    species: "", length: "", weight: "", style: "", lure: "", tackle: "",
-    notes: "", photo_url: "", lat: "", lng: "", caught_at: "", privacy: "all"
+    lat: 55.7558, lng: 37.6173,
+    species: "", length: "", weight: "",
+    style: "", lure: "", tackle: "",
+    notes: "", photo_url: "", caught_at: "", privacy: "all",
+    water_type:"", water_temp:"", wind_speed:"", pressure:""
   });
   const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string|null>(null);
 
-  const set = (k: string, v: string) => setForm(p=>({...p, [k]: v}));
+  const set = (k:string,v:any)=> setForm(p=>({...p,[k]:v}));
 
-  const submit = async (e: React.FormEvent) => {
+  const ts = useMemo(()=> {
+    if (!form.caught_at) return null;
+    const t = new Date(form.caught_at);
+    return Math.floor(t.getTime()/1000);
+  }, [form.caught_at]);
+
+  useEffect(()=>{
+    // авто-погода при наличии координат и времени
+    if (!form.lat || !form.lng) return;
+    const run = async ()=>{
+      try{
+        const j:any = await apiGet('/api/v1/weather', { lat: form.lat, lng: form.lng, dt: ts || undefined });
+        const d = j.data;
+        // извлечём "самое похоже" — current (или первый из data)
+        const current = d?.current ?? d?.data?.[0] ?? null;
+        if (current) {
+          if (current.temp != null) set('water_temp', current.temp); // формально это air temp, но для UX — ок до добавления реальных сенсоров
+          if (current.wind_speed != null) set('wind_speed', current.wind_speed);
+          if (current.pressure != null) set('pressure', current.pressure);
+        }
+      }catch(e){ /* молча */ }
+    };
+    run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.lat, form.lng, ts]);
+
+  const submit = async (e: React.FormEvent)=>{
     e.preventDefault();
-    setLoading(true); setErr(null);
-    try {
-      const payload: any = {
+    setLoading(true);
+    try{
+      const payload:any = {
         lat: Number(form.lat), lng: Number(form.lng),
         species: form.species || null,
         length: form.length ? Number(form.length) : null,
         weight: form.weight ? Number(form.weight) : null,
         style: form.style || null, lure: form.lure || null, tackle: form.tackle || null,
         notes: form.notes || null, photo_url: form.photo_url || null,
-        caught_at: form.caught_at || null,
-        privacy: form.privacy || "all",
+        caught_at: form.caught_at || null, privacy: form.privacy || "all",
+        water_type: form.water_type || null,
+        water_temp: form.water_temp ? Number(form.water_temp) : null,
+        wind_speed: form.wind_speed ? Number(form.wind_speed) : null,
+        pressure: form.pressure ? Number(form.pressure) : null
       };
-      const res = await fetch(buildUrl("/api/v1/catches"), {
-        method: "POST",
-        headers: { "Content-Type":"application/json", "Accept":"application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await apiPostJSON('/api/v1/catches', payload);
       toast("Улов добавлен");
       onDone();
-    } catch (e:any) {
-      setErr(e.message ?? String(e));
-    } finally {
+    }catch(e:any){
+      toast("Ошибка сохранения");
+      console.error(e);
+    }finally{
       setLoading(false);
     }
   };
 
   return (
-    <form onSubmit={submit} className="space-y-3">
-      <div className="grid grid-cols-2 gap-3">
-        <input className="input" placeholder="Широта (lat)" value={form.lat} onChange={e=>set("lat", e.target.value)} required />
-        <input className="input" placeholder="Долгота (lng)" value={form.lng} onChange={e=>set("lng", e.target.value)} required />
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <input className="input" placeholder="Вид рыбы" value={form.species} onChange={e=>set("species", e.target.value)} />
-        <input className="input" placeholder="Вес (кг)" value={form.weight} onChange={e=>set("weight", e.target.value)} />
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <input className="input" placeholder="Длина (см)" value={form.length} onChange={e=>set("length", e.target.value)} />
-        <input className="input" placeholder="Стиль" value={form.style} onChange={e=>set("style", e.target.value)} />
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <input className="input" placeholder="Приманка" value={form.lure} onChange={e=>set("lure", e.target.value)} />
-        <input className="input" placeholder="Снасти" value={form.tackle} onChange={e=>set("tackle", e.target.value)} />
-      </div>
-      <input className="input" placeholder="Фото (URL)" value={form.photo_url} onChange={e=>set("photo_url", e.target.value)} />
-      <input className="input" type="datetime-local" placeholder="Дата/время" value={form.caught_at} onChange={e=>set("caught_at", e.target.value)} />
-      <select className="input" value={form.privacy} onChange={e=>set("privacy", e.target.value)}>
-        <option value="all">Публично</option>
-        <option value="friends">Друзья</option>
-        <option value="private">Приватно</option>
-      </select>
-      <textarea className="input" placeholder="Заметки" value={form.notes} onChange={e=>set("notes", e.target.value)} />
-      {err && <div className="text-red-500 text-sm">{err}</div>}
-      <div className="flex gap-2 justify-end">
-        <button type="button" className="btn-secondary" onClick={onDone}>Отмена</button>
-        <button type="submit" className="btn-primary" disabled={loading}>{loading?"Сохранение…":"Сохранить"}</button>
-      </div>
-    </form>
+    <Card>
+      <CardContent>
+        <form onSubmit={submit} className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <Input placeholder="Вид рыбы" value={form.species} onChange={e=>set('species', e.target.value)} />
+            <Input placeholder="Дата/время" type="datetime-local" value={form.caught_at} onChange={e=>set('caught_at', e.target.value)} />
+            <Input placeholder="Вес (кг)" value={form.weight} onChange={e=>set('weight', e.target.value)} />
+            <Input placeholder="Длина (см)" value={form.length} onChange={e=>set('length', e.target.value)} />
+            <Input placeholder="Стиль" value={form.style} onChange={e=>set('style', e.target.value)} />
+            <Input placeholder="Приманка" value={form.lure} onChange={e=>set('lure', e.target.value)} />
+            <Input placeholder="Снасти" value={form.tackle} onChange={e=>set('tackle', e.target.value)} />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Input placeholder="Широта (lat)" value={form.lat} onChange={e=>set('lat', Number(e.target.value))} />
+            <Input placeholder="Долгота (lng)" value={form.lng} onChange={e=>set('lng', Number(e.target.value))} />
+          </div>
+
+          <MapPicker lat={form.lat} lng={form.lng} onPick={(a,b)=>{ set('lat',a); set('lng',b); }} height={250} />
+
+          <Uploader onUploaded={(url)=> set('photo_url', url)} />
+          {form.photo_url && <div className="text-xs text-gray-600 break-all">Файл: {form.photo_url}</div>}
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Select value={form.privacy} onChange={e=>set('privacy', e.target.value)}>
+              <option value="all">Публично</option>
+              <option value="friends">Друзья</option>
+              <option value="private">Приватно</option>
+            </Select>
+            <Input placeholder="Тип воды" value={form.water_type} onChange={e=>set('water_type', e.target.value)} />
+            <Input placeholder="Темп. воды/воздуха (°C)" value={form.water_temp} onChange={e=>set('water_temp', e.target.value)} />
+            <Input placeholder="Ветер (м/с)" value={form.wind_speed} onChange={e=>set('wind_speed', e.target.value)} />
+            <Input placeholder="Давление (гПа)" value={form.pressure} onChange={e=>set('pressure', e.target.value)} />
+          </div>
+
+          <Textarea placeholder="Заметки" value={form.notes} onChange={e=>set('notes', e.target.value)} />
+
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={onDone}>Отмена</Button>
+            <Button type="submit">{loading ? "Сохранение…" : "Сохранить улов"}</Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
   );
 }
