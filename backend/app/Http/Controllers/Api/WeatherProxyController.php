@@ -11,8 +11,8 @@ class WeatherProxyController extends Controller
     {
         $r->validate(['lat'=>'required|numeric','lng'=>'required|numeric','dt'=>'nullable|integer']);
         $lat=(float)$r->query('lat'); $lng=(float)$r->query('lng'); $dt=$r->query('dt');
-        $key = env('OPENWEATHER_KEY');
-        if(!$key){ return response()->json(['ok'=>false,'error'=>'OPENWEATHER_KEY missing'],500); }
+        $key = config('services.openweather.key') ?? env('OPENWEATHER_API_KEY') ?? env('OPENWEATHER_KEY');
+        if(!$key){ return response()->json(['ok'=>false,'error'=>'OPENWEATHER_API_KEY missing'],500); }
 
         if($dt){
             $url="https://api.openweathermap.org/data/3.0/onecall/timemachine";
