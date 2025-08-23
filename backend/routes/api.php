@@ -35,3 +35,17 @@ Route::prefix('v1')->group(function () {
     Route::post('/catch/{id}/like',[LikeController::class,'toggle']);
     Route::post('/follow/{userId}',[FollowController::class,'toggle']);
 });
+
+/* ==== Bonus Points API (S1–S3) ==== */
+use App\Http\Controllers\Api\PointsController;
+use App\Http\Controllers\Api\ReferralController;
+
+Route::prefix('v1')->group(function () {
+    Route::middleware('auth:sanctum')->group(function () {
+        Route::get('points/me', [PointsController::class, 'me']);
+        Route::get('points/ledger', [PointsController::class, 'ledger']);
+
+        Route::get('referral/code', [ReferralController::class, 'myCode']);
+        Route::post('referral/link', [ReferralController::class, 'link']); // body: {code}
+    });
+});
