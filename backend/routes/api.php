@@ -1,6 +1,6 @@
 <?php
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\Api\{HealthController,UploadController,MapController,CatchesController};
+use App\Http\Controllers\Api\{HealthController,UploadController,MapController,CatchesController,BonusController};
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ProfileController;
 
@@ -11,13 +11,13 @@ Route::prefix('v1')->group(function(){
   Route::post('/upload/image',[UploadController::class,'image']);
 
   // карта/точки
-  Route::get('/map/points',[MapController::class,'index']);
-  Route::post('/map/points',[MapController::class,'store']);
-  Route::get('/map/points/{id}',[MapController::class,'show']);
-  Route::put('/map/points/{id}',[MapController::class,'update']);
-  Route::delete('/map/points/{id}',[MapController::class,'destroy']);
-  Route::get('/map/categories',[MapController::class,'categories']);
-  Route::get('/map/list',[MapController::class,'list']);
+  Route::get('/v1/map/points', [MapController::class, 'index']);
+  Route::post('/v1/map/points', [MapController::class, 'store']);
+  Route::get('/v1/map/points/{id}', [MapController::class, 'show']);
+  Route::match(['put','patch'], '/v1/map/points/{id}', [MapController::class, 'update']);
+  Route::delete('/v1/map/points/{id}', [MapController::class, 'destroy']);
+  Route::get('/v1/map/categories', [MapController::class, 'categories']);
+  Route::get('/v1/map/points/list', [MapController::class, 'list']);
 
   // уловы
   Route::get('/catches',[CatchesController::class,'index']);
