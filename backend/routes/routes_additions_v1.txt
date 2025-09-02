@@ -1,0 +1,23 @@
+
+// === Добавьте внутрь Route::prefix('v1')->group(function () { ... }) ===
+
+// Комментарии (список):
+use App\Http\Controllers\Api\CommentsReadController;
+Route::get('/catch/{id}/comments', [CommentsReadController::class, 'index']); // если не хотите править ваш CommentController
+
+// Погода — сохранённые локации:
+use App\Http\Controllers\Api\WeatherLocationsController;
+Route::get('/weather-locations', [WeatherLocationsController::class, 'index']);
+Route::post('/weather-locations', [WeatherLocationsController::class, 'store']);
+Route::delete('/weather-locations/{id}', [WeatherLocationsController::class, 'destroy']);
+
+// Лидерборд:
+use App\Http\Controllers\Api\LeaderboardController;
+Route::get('/leaderboard', [LeaderboardController::class, 'index']);
+
+// Профиль — уловы/маркеры:
+use App\Http\Controllers\Api\UserCatchesController;
+Route::get('/user/{id}/catches', [UserCatchesController::class, 'index']);
+Route::get('/user/{id}/markers', [UserCatchesController::class, 'markers']);
+
+// WeatherProxyController: если нет OPENWEATHER_KEY, возвращайте 204 (пример в README)

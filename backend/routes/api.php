@@ -17,9 +17,32 @@ use App\Http\Controllers\Api\MapController;
 use App\Http\Controllers\Api\WeatherController;
 use App\Http\Controllers\Api\CatchesController;
 
+use App\Http\Controllers\Api\CommentsReadController;
+use App\Http\Controllers\Api\WeatherLocationsController;
+use App\Http\Controllers\Api\LeaderboardController;
+use App\Http\Controllers\Api\UserCatchesController;
+
 Route::get('/health', fn()=>response()->json(['ok'=>true,'ts'=>now()]));
 
 Route::prefix('v1')->group(function () {
+    
+Route::get('/catch/{id}/comments', [CommentsReadController::class, 'index']); // если не хотите править ваш CommentController
+
+// Погода — сохранённые локации:
+
+Route::get('/weather-locations', [WeatherLocationsController::class, 'index']);
+Route::post('/weather-locations', [WeatherLocationsController::class, 'store']);
+Route::delete('/weather-locations/{id}', [WeatherLocationsController::class, 'destroy']);
+
+// Лидерборд:
+
+Route::get('/leaderboard', [LeaderboardController::class, 'index']);
+
+// Профиль — уловы/маркеры:
+
+Route::get('/user/{id}/catches', [UserCatchesController::class, 'index']);
+Route::get('/user/{id}/markers', [UserCatchesController::class, 'markers']);
+
     // карты/точки
     Route::get('/map/points',[PointsController::class,'index']);
     Route::get('/points/categories',[PointsController::class,'categories']);

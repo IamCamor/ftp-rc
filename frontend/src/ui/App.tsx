@@ -1,51 +1,129 @@
-import { Container, CssBaseline, ThemeProvider, createTheme, LinearProgress, Box } from "@mui/material";
-import { Routes, Route, NavLink, useLocation } from "react-router-dom";
-import { Suspense, useEffect, useState } from "react";
-import MapView from "./components/MapView";
-import FeedScreen from "./screens/FeedScreen";
-import AddPointScreen from "./screens/AddPointScreen";
-import AddCatchScreen from "./screens/AddCatchScreen";
 
-const theme = createTheme({
-  palette:{ mode:"dark", primary:{ main:"#57B0E6" }, secondary:{ main:"#1DE9B6" } },
-  shape:{ borderRadius:16 }
-});
+import React, { useMemo, useState } from "react";
+import MapScreen from "../screens/MapScreen";
+import FeedScreen from "../screens/FeedScreen";
+import ProfileScreen from "../screens/ProfileScreen";
+import AuthScreen from "../screens/AuthScreen";
+import WeatherScreen from "../screens/WeatherScreen";
+import LeaderboardScreen from "../screens/LeaderboardScreen";
+import CommentsScreen from "../screens/CommentsScreen";
+import CatchDetailScreen from "../screens/CatchDetailScreen";
+import BottomNav from "../components/BottomNav";
+import { useAuthState } from "../data/auth";
 
-function TopBar(){
-  const linkSx = { color:"#fff", textDecoration:"none", marginRight:16 };
-  return (
-    <div style={{position:"sticky",top:0,zIndex:10,padding:"12px 16px"}} className="glass">
-      <NavLink to="/map" style={linkSx as any}>Карта</NavLink>
-      <NavLink to="/feed" style={linkSx as any}>Лента</NavLink>
-      <NavLink to="/add/point" style={linkSx as any}>+ Точка</NavLink>
-      <NavLink to="/add/catch" style={linkSx as any}>+ Улов</NavLink>
-    </div>
+type Tab = "map" | "feed" | "weather" | "leaderboard" | "profile";
+type FeedTab = "all" | "friends" | "near" | "species";
+
+export default function App() {
+  const [tab, setTab] = useState<Tab>("map");
+  const [feedTab, setFeedTab] = useState<FeedTab>("all");
+  const { isAuthed } = useAuthState();
+  const [commentsForCatchId, setCommentsForCatchId] = useState<number | null>(null);
+  const [detailsCatchId, setDetailsCatchId] = useState<number | null>(null);
+
+  const needAuth = useMemo(
+    () => (tab === "profile" || feedTab === "friends") && !isAuthed,
+    [tab, feedTab, isAuthed]
   );
-}
 
-function GlobalLoader(){
-  const loc=useLocation(); const [loading,setLoading]=useState(true);
-  useEffect(()=>{ setLoading(true); const t=setTimeout(()=>setLoading(false),250); return ()=>clearTimeout(t); },[loc.pathname]);
-  return loading ? <LinearProgress/> : null;
-}
+  const onFab = () => {
+    if (tab === "map") {
+      window.dispatchEvent(new CustomEvent("open:add-point"));
+    } else if (tab === "feed") {
+      window.dispatchEvent(new CustomEvent("open:add-catch"));
+    } else {
+      alert("Действие появится позже");
+    }
+  };
 
-export default function App(){
+  // external events from other UI
+  React.useEffect(() => {
+    const openCatch = (e: any) => setDetailsCatchId(e.detail?.id ?? null);
+    window.addEventListener("open:catch", openCatch as any);
+    return () => window.removeEventListener("open:catch", openCatch as any);
+  }, []);
+
   return (
-    <ThemeProvider theme={theme}>
-      <CssBaseline/>
-      <TopBar/>
-      <GlobalLoader/>
-      <Container sx={{ py:2, pb:12 }}>
-        <Suspense fallback={<Box sx={{my:2}}><LinearProgress/></Box>}>
-          <Routes>
-            <Route path="/" element={<MapView/>}/>
-            <Route path="/map" element={<MapView/>}/>
-            <Route path="/feed" element={<FeedScreen/>}/>
-            <Route path="/add/point" element={<AddPointScreen/>}/>
-            <Route path="/add/catch" element={<AddCatchScreen/>}/>
-          </Routes>
-        </Suspense>
-      </Container>
-    </ThemeProvider>
+    <div className="relative w-full h-screen bg-[rgb(245,246,248)]">
+      {tab === "map" && (
+        <MapScreen
+          onOpenCatch={(id: number) => setDetailsCatchId(id)}
+          onOpenSpecies={(sp: string) => {
+            setTab("feed");
+            setFeedTab("species");
+            window.dispatchEvent(new CustomEvent("feed:set-species", { detail: sp }));
+          }}
+        />
+      )}
+
+      {tab === "feed" && (
+        <FeedScreen
+          tab={feedTab}
+          onChangeTab={setFeedTab}
+          onOpenCatch={(id: number) => setDetailsCatchId(id)}
+          onOpenComments={(id: number) => setCommentsForCatchId(id)}
+          onOpenProfile={(uid: number) => {
+            setTab("profile");
+            window.dispatchEvent(new CustomEvent("profile:open", { detail: uid }));
+          }}
+        />
+      )}
+
+      {tab === "weather" && <WeatherScreen />}
+      {tab === "leaderboard" && (
+        <LeaderboardScreen
+          onOpenUser={(uid: number) => {
+            setTab("profile");
+            window.dispatchEvent(new CustomEvent("profile:open", { detail: uid }));
+          }}
+        />
+      )}
+      {tab === "profile" && <ProfileScreen />}
+
+      <BottomNav
+        onFab={onFab}
+        active={tab}
+        onChange={(t: Tab) => setTab(t)}
+        items={[
+          { key: "map", label: "Карта", icon: "map" },
+          { key: "feed", label: "Лента", icon: "feed" },
+          { key: "weather", label: "Погода", icon: "weather" },
+          { key: "leaderboard", label: "Топ", icon: "trophy" },
+          { key: "profile", label: "Профиль", icon: "user" },
+        ]}
+      />
+
+      {needAuth && <AuthScreen onClose={() => setTab("map")} />}
+
+      {commentsForCatchId !== null && (
+        <CommentsScreen
+          catchId={commentsForCatchId}
+          onClose={() => setCommentsForCatchId(null)}
+        />
+      )}
+
+      {detailsCatchId !== null && (
+        <CatchDetailScreen
+          catchId={detailsCatchId}
+          onClose={() => setDetailsCatchId(null)}
+          onOpenComments={() => {
+            if (detailsCatchId !== null) setCommentsForCatchId(detailsCatchId);
+          }}
+          onOpenPlace={(placeId?: number, bbox?: [number, number, number, number]) => {
+            setTab("map");
+            window.dispatchEvent(new CustomEvent("map:focus", { detail: { placeId, bbox } }));
+          }}
+          onOpenSpecies={(species: string) => {
+            setTab("feed");
+            setFeedTab("species");
+            window.dispatchEvent(new CustomEvent("feed:set-species", { detail: species }));
+          }}
+          onOpenProfile={(uid: number) => {
+            setTab("profile");
+            window.dispatchEvent(new CustomEvent("profile:open", { detail: uid }));
+          }}
+        />
+      )}
+    </div>
   );
 }
