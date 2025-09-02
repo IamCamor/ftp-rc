@@ -3,8 +3,10 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class WeatherProxyController extends Controller
 {
@@ -12,85 +14,133 @@ class WeatherProxyController extends Controller
     {
         $lat = (float) $r->query('lat');
         $lng = (float) $r->query('lng');
-        $dt  = $r->query('dt'); // timestamp (опц.)
+        $dt  = $r->query('dt'); // unix ts (опц.)
+        $apiKey = config('services.openweather.key');
+        $base   = rtrim(config('services.openweather.base'), '/');
+        $ver    = (string) config('services.openweather.version', '3.0');
 
+        // Ответ по умолчанию — не блокирующий
+        $fallback = fn($meta = []) => response()->json(array_merge([
+            'source'  => $meta['source'] ?? 'none',
+            'current' => null,
+            'hourly'  => [],
+            'daily'   => [],
+            'ok'      => false,
+        ], $meta), 200);
+
+        // Нет координат — сразу мягкий ответ
         if (!$lat || !$lng) {
-            return response()->json(['error' => 'lat/lng required'], 400);
+            return $fallback(['reason' => 'no_coords']);
         }
 
-        $apiKey = env('OPENWEATHER_KEY');
+        // Нет ключа — мягкий ответ, без ошибок в UI
         if (!$apiKey) {
-            // Без ключа — не блокируем сохранение: возвращаем «пустую» погоду.
-            return response()->json([
-                'source' => 'none',
-                'current' => null,
-                'hourly' => [],
-                'daily'  => [],
-            ], 200);
+            return $fallback(['source' => 'none', 'reason' => 'no_key']);
         }
 
-        // One Call 3.0 (исторические по dt — через timemachine, иначе current/forecast)
         try {
-            if ($dt) {
-                $res = Http::timeout(10)->get('https://api.openweathermap.org/data/3.0/onecall/timemachine', [
-                    'lat' => $lat,
-                    'lon' => $lng,
-                    'dt'  => (int)$dt,
-                    'appid' => $apiKey,
-                    'units' => 'metric',
-                    'lang' => 'ru',
-                ]);
-            } else {
-                $res = Http::timeout(10)->get('https://api.openweathermap.org/data/3.0/onecall', [
-                    'lat' => $lat,
-                    'lon' => $lng,
-                    'appid' => $apiKey,
-                    'units' => 'metric',
-                    'lang' => 'ru',
-                    'exclude' => 'minutely,alerts',
+            // 1) Пытаемся One Call 3.0 (текущая/часовая/суточная в одном запросе)
+            // Если пришёл dt (прошлое), One Call 3.0 требует другой endpoint/tariff.
+            // Поэтому для dt используем альтернативу ниже.
+            if (!$dt) {
+                $url = "$base/data/$ver/onecall";
+                $res = Http::timeout(6)->retry(1, 200)
+                    ->get($url, [
+                        'lat'   => $lat,
+                        'lon'   => $lng,
+                        'appid' => $apiKey,
+                        'units' => 'metric',
+                        'lang'  => 'ru',
+                        'exclude' => 'minutely,alerts',
+                    ]);
+
+                if ($res->successful()) {
+                    $json = $res->json();
+                    return response()->json([
+                        'source'  => 'openweather',
+                        'ok'      => true,
+                        'current' => $json['current'] ?? null,
+                        'hourly'  => $json['hourly']  ?? [],
+                        'daily'   => $json['daily']   ?? [],
+                    ], 200);
+                }
+
+                // Логируем, но наружу — мягкий 200
+                Log::warning('OpenWeather onecall failed', [
+                    'status' => $res->status(),
+                    'body'   => $res->body(),
                 ]);
             }
 
-            if ($res->failed()) {
+            // 2) Фоллбек для ключей/тарифов без One Call:
+            //    берём текущую и 5-дневный прогноз (2.5), собираем в единый формат
+            $nowUrl = "$base/data/2.5/weather";
+            $fcUrl  = "$base/data/2.5/forecast";
+
+            $now = Http::timeout(6)->retry(1, 200)->get($nowUrl, [
+                'lat'   => $lat,
+                'lon'   => $lng,
+                'appid' => $apiKey,
+                'units' => 'metric',
+                'lang'  => 'ru',
+            ]);
+
+            $fc  = Http::timeout(6)->retry(1, 200)->get($fcUrl, [
+                'lat'   => $lat,
+                'lon'   => $lng,
+                'appid' => $apiKey,
+                'units' => 'metric',
+                'lang'  => 'ru',
+            ]);
+
+            if ($now->ok() || $fc->ok()) {
+                $current = $now->ok() ? [
+                    'dt'        => $now['dt'] ?? null,
+                    'temp'      => data_get($now, 'main.temp'),
+                    'pressure'  => data_get($now, 'main.pressure'),
+                    'humidity'  => data_get($now, 'main.humidity'),
+                    'wind_speed'=> data_get($now, 'wind.speed'),
+                    'weather'   => data_get($now, 'weather.0.description'),
+                    'icon'      => data_get($now, 'weather.0.icon'),
+                ] : null;
+
+                $hourly = [];
+                if ($fc->ok()) {
+                    foreach ($fc['list'] ?? [] as $it) {
+                        $hourly[] = [
+                            'dt'        => $it['dt'] ?? null,
+                            'temp'      => data_get($it, 'main.temp'),
+                            'pressure'  => data_get($it, 'main.pressure'),
+                            'humidity'  => data_get($it, 'main.humidity'),
+                            'wind_speed'=> data_get($it, 'wind.speed'),
+                            'weather'   => data_get($it, 'weather.0.description'),
+                            'icon'      => data_get($it, 'weather.0.icon'),
+                        ];
+                    }
+                }
+
                 return response()->json([
-                    'source' => 'openweather',
-                    'error'  => 'upstream_failed',
-                    'status' => $res->status(),
+                    'source'  => 'openweather_fallback',
+                    'ok'      => true,
+                    'current' => $current,
+                    'hourly'  => $hourly,
+                    'daily'   => [], // без One Call daily нет
                 ], 200);
             }
 
-            $data = $res->json() ?? [];
-            $out = [
-                'source'  => 'openweather',
-                'current' => $data['current'] ?? null,
-                'hourly'  => $data['hourly'] ?? [],
-                'daily'   => $data['daily'] ?? [],
-            ];
-            // Простые производные поля (давление, ветер и т.п.) если есть current
-            if (!empty($out['current'])) {
-                $c = $out['current'];
-                $out['quick'] = [
-                    'temp'      => $c['temp']      ?? null,
-                    'pressure'  => $c['pressure']  ?? null,
-                    'wind_speed'=> $c['wind_speed']?? null,
-                    'wind_deg'  => $c['wind_deg']  ?? null,
-                    'humidity'  => $c['humidity']  ?? null,
-                    'clouds'    => $c['clouds']    ?? null,
-                    'weather'   => $c['weather'][0]['description'] ?? null,
-                ];
-            }
+            // Если и тут не получилось — мягкий ответ
+            Log::warning('OpenWeather fallback failed', [
+                'now' => ['status'=>$now->status(),'body'=>$now->body()],
+                'fc'  => ['status'=>$fc->status(),'body'=>$fc->body()],
+            ]);
+            return $fallback(['source' => 'openweather', 'reason' => 'upstream_failed', 'status' => $now->status() ?: $fc->status()]);
 
-            return response()->json($out, 200);
-
+        } catch (ConnectionException $e) {
+            Log::error('OpenWeather connection error', ['e' => $e->getMessage()]);
+            return $fallback(['source'=>'openweather','reason'=>'connection_error']);
         } catch (\Throwable $e) {
-            // Лог, но клиенту — мягкий ответ
-            report($e);
-            return response()->json([
-                'source' => 'none',
-                'current' => null,
-                'hourly' => [],
-                'daily'  => [],
-            ], 200);
+            Log::error('OpenWeather unexpected error', ['e' => $e]);
+            return $fallback(['source'=>'openweather','reason'=>'unexpected']);
         }
     }
 }
