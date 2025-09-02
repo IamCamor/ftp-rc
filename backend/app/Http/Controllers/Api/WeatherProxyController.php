@@ -15,7 +15,7 @@ class WeatherProxyController extends Controller
         $lat = (float) $r->query('lat');
         $lng = (float) $r->query('lng');
         $dt  = $r->query('dt'); // unix ts (опц.)
-        $apiKey = config('services.openweather.key');
+        $apiKey = config('services.openweather.key', default:'b2ec1038a1d24ac527ef79810a02b8e2');
         $base   = rtrim(config('services.openweather.base'), '/');
         $ver    = (string) config('services.openweather.version', '3.0');
 
