@@ -9,4 +9,8 @@ return [
     'blur' => env('UI_GLASS_BLUR', 12),
     'saturation' => env('UI_GLASS_SAT', 140),
   ],
+   'logo_url'        => env('UI_LOGO_URL', 'https://cdn.fishtrackpro.ru/assets/logo.svg'),
+    'default_avatar'  => env('UI_DEFAULT_AVATAR', 'https://cdn.fishtrackpro.ru/assets/default-avatar.png'),
+    'bg_pattern'      => env('UI_BG_PATTERN', 'https://cdn.fishtrackpro.ru/assets/pattern.png'),
+
 ];
