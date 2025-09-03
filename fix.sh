@@ -1,548 +1,1037 @@
 #!/usr/bin/env bash
+# fishtrackpro_apply_patch.sh
+# ------------------------------------------------------------------------------
+# Единый установочный скрипт для FishTrackPro:
+# - Бэкенд (Laravel): фиксы фида, CORS/401 JSON, эндпоинты карты, конфиги UI и map_icons
+# - Фронтенд (Vite/React): экран ленты, форма добавления улова, карта OSM с разнотипными пинами
+# - Nginx: конфиги для api. и www. доменов (без редиректов с API на WEB)
+#
+# Запуск:
+#   chmod +x fishtrackpro_apply_patch.sh
+#   ./fishtrackpro_apply_patch.sh all               # применить всё
+#   ./fishtrackpro_apply_patch.sh backend           # только бэкенд
+#   ./fishtrackpro_apply_patch.sh frontend          # только фронтенд
+#   ./fishtrackpro_apply_patch.sh nginx             # только nginx-конфиги
+#
+# Путь запуска:
+#   - backend: из корня Laravel-проекта (где есть app/, config/, routes/)
+#   - frontend: из корня фронта (где есть src/, .env и т.п.) — для простоты скрипт создаёт src/ при отсутствии
+#   - nginx: создаст файлы в ./nginx/ (дальше включите их в конфигурацию вашего сервера)
+# ------------------------------------------------------------------------------
+
 set -euo pipefail
 
-ZIP_NAME="ftp-hotfix-comments-map-weather.zip"
-STAGE=".hotfix_stage_$$"
+# ---------- Утилиты ----------
+green() { printf "\033[32m%s\033[0m\n" "$*"; }
+yellow() { printf "\033[33m%s\033[0m\n" "$*"; }
+red() { printf "\033[31m%s\033[0m\n" "$*"; }
+mkd() { install -d "$1"; }
 
-# Очистка при выходе
-cleanup() { rm -rf "$STAGE"; }
-trap cleanup EXIT
-
-# ---- Структура архива ----
-mkdir -p "$STAGE/backend/app/Http/Controllers/Api"
-mkdir -p "$STAGE/frontend/src/components"
-mkdir -p "$STAGE/frontend/src/screens"
-mkdir -p "$STAGE/frontend/src/lib"
-mkdir -p "$STAGE/frontend/src"
-mkdir -p "$STAGE/frontend/public"
-mkdir -p "$STAGE/frontend/src/styles"
-
-########################################
-# BACKEND: CommentController.php (фикс 422 + гибкие поля)
-########################################
-cat > "$STAGE/backend/app/Http/Controllers/Api/CommentController.php" <<'PHP'
+# ---------- Бэкенд ----------
+backend_middleware() {
+  mkd app/Http/Middleware
+  cat > app/Http/Middleware/ForceJsonResponse.php <<'PHP'
 <?php
 
-namespace App\Http\Controllers\Api;
+namespace App\Http\Middleware;
+
+use Closure;
+use Illuminate\Http\Request;
+
+class ForceJsonResponse
+{
+    public function handle(Request $request, Closure $next)
+    {
+        $request->headers->set('Accept', 'application/json');
+        return $next($request);
+    }
+}
+PHP
+}
+
+backend_resource() {
+  mkd app/Http/Resources
+  cat > app/Http/Resources/CatchResource.php <<'PHP'
+<?php
+
+namespace App\Http\Resources;
+
+use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Facades\Storage;
+
+class CatchResource extends JsonResource
+{
+    public function toArray(Request $request): array
+    {
+        $avatarUrl = '';
+        if (!empty($this->user_avatar_path)) {
+            $avatarUrl = preg_match('#^https?://#', $this->user_avatar_path)
+                ? $this->user_avatar_path
+                : Storage::disk('public')->url($this->user_avatar_path);
+        }
+
+        $mediaUrl = '';
+        if (!empty($this->photo_url)) {
+            $mediaUrl = preg_match('#^https?://#', $this->photo_url)
+                ? $this->photo_url
+                : Storage::disk('public')->url($this->photo_url);
+        }
+
+        return [
+            'id' => (int)$this->id,
+            'user_id' => (int)$this->user_id,
+            'user_name' => (string)($this->user_name ?? ''),
+            'user_avatar' => $avatarUrl,
+            'lat' => (float)$this->lat,
+            'lng' => (float)$this->lng,
+            'species' => (string)($this->species ?? ''),
+            'length' => is_null($this->length) ? null : (float)$this->length,
+            'weight' => is_null($this->weight) ? null : (float)$this->weight,
+            'depth' => is_null($this->depth) ? null : (float)$this->depth,
+            'method' => (string)($this->style ?? ''),
+            'bait' => (string)($this->lure ?? ''),
+            'gear' => (string)($this->tackle ?? ''),
+            'water_type' => (string)($this->water_type ?? ''),
+            'water_temp' => is_null($this->water_temp) ? null : (float)$this->water_temp,
+            'wind_speed' => is_null($this->wind_speed) ? null : (float)$this->wind_speed,
+            'pressure' => is_null($this->pressure) ? null : (float)$this->pressure,
+            'companions' => (string)($this->companions ?? ''),
+            'caption' => (string)($this->notes ?? ''),
+            'media_url' => $mediaUrl,
+            'privacy' => (string)($this->privacy ?? 'all'),
+            'caught_at' => $this->caught_at ? $this->caught_at : null,
+            'created_at' => $this->created_at,
+            'likes_count' => (int)($this->likes_count ?? 0),
+            'comments_count' => (int)($this->comments_count ?? 0),
+            'liked_by_me' => (bool)($this->liked_by_me ?? false),
+        ];
+    }
+}
+PHP
+}
+
+backend_controllers() {
+  mkd app/Http/Controllers/Api/V1
+  cat > app/Http/Controllers/Api/V1/FeedController.php <<'PHP'
+<?php
+
+namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Resources\CatchResource;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 
-class CommentController extends Controller
+class FeedController extends Controller
 {
-    public function store(Request $r, $catchId)
+    public function index(Request $request)
     {
-        // Принимаем text | comment | body | message
-        $raw = $r->input('text', $r->input('comment', $r->input('body', $r->input('message', null))));
-        $text = is_string($raw) ? trim($raw) : '';
+        $limit = (int)($request->query('limit', 20));
+        $offset = (int)($request->query('offset', 0));
+        $viewerId = $request->user()?->id;
 
-        if ($text === '') {
-            return response()->json([
-                'message' => 'Validation error',
-                'errors' => ['text' => ['Поле комментария обязательно']],
-            ], 422);
-        }
-
-        $userId = optional($r->user())->id;
-        $parentId = $r->integer('parent_id');
-        $now = now();
-
-        // Набор полей к insert — минимально совместимый
-        $insert = [
-            'catch_id'   => (int)$catchId,
-            'user_id'    => $userId,
-            'parent_id'  => $parentId ?: null,
-            'text'       => $text,
-            'created_at' => $now,
-            'updated_at' => $now,
-        ];
-
-        // Если есть колонка is_approved — одобряем сразу
-        if (Schema::hasColumn('catch_comments', 'is_approved')) {
-            $insert['is_approved'] = 1;
-        }
-
-        // Опционально поддержим author_name, если колонка существует
-        if (!$userId && Schema::hasColumn('catch_comments', 'author_name')) {
-            $guest = trim((string)$r->input('guest_name', ''));
-            $insert['author_name'] = $guest !== '' ? $guest : null;
-        }
-
-        $id = DB::table('catch_comments')->insertGetId($insert);
-
-        // Вернём карточку комментария с именем и аватаром (если есть)
-        $select = "
-            cc.id, cc.catch_id, cc.parent_id, cc.text, cc.created_at
+        $sql = "
+            SELECT 
+                cr.id,
+                cr.user_id,
+                u.name AS user_name,
+                u.avatar_path AS user_avatar_path,
+                cr.lat, cr.lng, cr.species, cr.length, cr.weight, cr.depth,
+                cr.style, cr.lure, cr.tackle,
+                cr.water_type, cr.water_temp, cr.wind_speed, cr.pressure,
+                cr.companions,
+                cr.notes, cr.photo_url, cr.privacy, cr.caught_at,
+                cr.created_at,
+                (SELECT COUNT(*) FROM catch_likes cl WHERE cl.catch_id=cr.id) AS likes_count,
+                (SELECT COUNT(*) FROM catch_comments cc 
+                    WHERE cc.catch_id=cr.id 
+                      AND (cc.is_approved=1 OR cc.is_approved IS NULL)
+                ) AS comments_count,
+                " . ($viewerId ? "EXISTS(SELECT 1 FROM catch_likes cl2 WHERE cl2.catch_id=cr.id AND cl2.user_id=?)" : "0") . " AS liked_by_me
+            FROM catch_records cr
+            LEFT JOIN users u ON u.id = cr.user_id
+            WHERE 
+                (
+                    cr.privacy = 'all'
+                    OR (
+                        cr.privacy = 'friends' 
+                        AND " . ($viewerId ? "EXISTS(SELECT 1 FROM friendships f
+                              WHERE ((f.user_id = cr.user_id AND f.friend_id = ?) OR (f.user_id = ? AND f.friend_id = cr.user_id))
+                                AND f.status = 'accepted')" : "0") . "
+                    )
+                )
+            ORDER BY cr.created_at DESC
+            LIMIT ? OFFSET ?
         ";
-        if (Schema::hasColumn('catch_comments','is_approved')) {
-            $select .= ", cc.is_approved";
+
+        $bindings = [];
+        if ($viewerId) {
+            $bindings[] = $viewerId;
+            $bindings[] = $viewerId;
+            $bindings[] = $viewerId;
         }
+        $bindings[] = $limit;
+        $bindings[] = $offset;
 
-        $avatarExpr = "COALESCE(u.avatar_url, u.photo_url, '')";
-        $nameExpr   = "COALESCE(u.name, 'Гость')";
-        if (Schema::hasColumn('catch_comments','author_name')) {
-            $nameExpr = "COALESCE(u.name, cc.author_name, 'Гость')";
-        }
+        $rows = DB::select($sql, $bindings);
 
-        $item = DB::table('catch_comments as cc')
-            ->leftJoin('users as u','u.id','=','cc.user_id')
-            ->selectRaw($select . ",
-                $nameExpr as author_name,
-                $avatarExpr as author_avatar
-            ")
-            ->where('cc.id', $id)
-            ->first();
-
-        return response()->json(['item' => $item], 201);
+        return CatchResource::collection(collect($rows));
     }
 }
 PHP
 
-########################################
-# FRONTEND: api.ts — функции points/feed/weather + комменты
-########################################
-cat > "$STAGE/frontend/src/lib/api.ts" <<'TS'
-export const API_BASE = (window as any).__API__ || 'https://api.fishtrackpro.ru/api/v1';
+  cat > app/Http/Controllers/Api/V1/CatchController.php <<'PHP'
+<?php
 
-async function req(path: string, init?: RequestInit) {
+namespace App\Http\Controllers\Api\V1;
+
+use App\Http\Controllers\Controller;
+use App\Http\Requests\StoreCatchRequest;
+use App\Http\Resources\CatchResource;
+use Illuminate\Support\Facades\DB;
+
+class CatchController extends Controller
+{
+    public function store(StoreCatchRequest $request)
+    {
+        $userId = $request->user()->id;
+
+        $photoPath = $request->input('photo_url');
+        if ($request->hasFile('photo')) {
+            $photoPath = $request->file('photo')->store('catches', 'public');
+        }
+
+        $id = DB::table('catch_records')->insertGetId([
+            'user_id' => $userId,
+            'lat' => $request->float('lat'),
+            'lng' => $request->float('lng'),
+            'species' => $request->input('species'),
+            'length' => $request->input('length'),
+            'weight' => $request->input('weight'),
+            'depth' => $request->input('depth'),
+            'style' => $request->input('style'),
+            'lure' => $request->input('lure'),
+            'tackle' => $request->input('tackle'),
+            'privacy' => $request->input('privacy', 'all'),
+            'caught_at' => $request->input('caught_at'),
+            'water_type' => $request->input('water_type'),
+            'water_temp' => $request->input('water_temp'),
+            'wind_speed' => $request->input('wind_speed'),
+            'pressure' => $request->input('pressure'),
+            'companions' => $request->input('companions'),
+            'notes' => $request->input('notes'),
+            'photo_url' => $photoPath,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $row = DB::table('catch_records as cr')
+            ->leftJoin('users as u','u.id','=','cr.user_id')
+            ->where('cr.id',$id)
+            ->selectRaw("
+                cr.*, 
+                u.name as user_name, 
+                u.avatar_path as user_avatar_path,
+                (SELECT COUNT(*) FROM catch_likes cl WHERE cl.catch_id=cr.id) AS likes_count,
+                (SELECT COUNT(*) FROM catch_comments cc WHERE cc.catch_id=cr.id AND (cc.is_approved=1 OR cc.is_approved IS NULL)) AS comments_count
+            ")->first();
+
+        return (new CatchResource($row))->response()->setStatusCode(201);
+    }
+}
+PHP
+
+  cat > app/Http/Controllers/Api/V1/MapController.php <<'PHP'
+<?php
+
+namespace App\Http\Controllers\Api\V1;
+
+use App\Http\Controllers\Controller;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+
+class MapController extends Controller
+{
+    public function icons(Request $request)
+    {
+        return response()->json(config('map_icons'));
+    }
+
+    public function points(Request $request)
+    {
+        $limit = (int)($request->query('limit', 1000));
+        $offset = (int)($request->query('offset', 0));
+
+        $points = DB::table('fishing_points')
+            ->select('id','lat','lng','title','description','category','is_highlighted','status')
+            ->where('is_public', 1)
+            ->where('status', 'approved')
+            ->orderByDesc('id')
+            ->limit($limit)->offset($offset)
+            ->get()
+            ->map(function($p){
+                return [
+                    'id' => (int)$p->id,
+                    'type' => $p->category ?? 'spot',
+                    'lat' => (float)$p->lat,
+                    'lng' => (float)$p->lng,
+                    'title' => $p->title ?? '',
+                    'descr' => $p->description ?? '',
+                    'highlight' => (bool)($p->is_highlighted ?? false),
+                    'source' => 'fishing_points',
+                ];
+            })->toArray();
+
+        $stores = DB::table('stores')
+            ->select('id','lat','lng','name','address','category')
+            ->whereNotNull('lat')->whereNotNull('lng')
+            ->orderByDesc('id')
+            ->limit($limit)->offset($offset)
+            ->get()
+            ->map(function($s){
+                return [
+                    'id' => (int)$s->id,
+                    'type' => $s->category ? strtolower($s->category) : 'store',
+                    'lat' => (float)$s->lat,
+                    'lng' => (float)$s->lng,
+                    'title' => $s->name ?? '',
+                    'descr' => $s->address ?? '',
+                    'highlight' => false,
+                    'source' => 'stores',
+                ];
+            })->toArray();
+
+        $events = DB::table('events')
+            ->select('id','title','location_lat','location_lng','region','starts_at','ends_at')
+            ->whereNotNull('location_lat')->whereNotNull('location_lng')
+            ->orderByDesc('starts_at')
+            ->limit($limit)->offset($offset)
+            ->get()
+            ->map(function($e){
+                return [
+                    'id' => (int)$e->id,
+                    'type' => 'event',
+                    'lat' => (float)$e->location_lat,
+                    'lng' => (float)$e->location_lng,
+                    'title' => $e->title ?? '',
+                    'descr' => trim(($e->region ?? '').' '.($e->starts_at ?? '')),
+                    'highlight' => false,
+                    'source' => 'events',
+                ];
+            })->toArray();
+
+        return response()->json([
+            'items' => array_values(array_merge($points, $stores, $events)),
+        ]);
+    }
+}
+PHP
+}
+
+backend_request_rules() {
+  mkd app/Http/Requests
+  cat > app/Http/Requests/StoreCatchRequest.php <<'PHP'
+<?php
+
+namespace App\Http\Requests;
+
+use Illuminate\Foundation\Http\FormRequest;
+
+class StoreCatchRequest extends FormRequest
+{
+    public function authorize(): bool
+    {
+        return (bool)$this->user();
+    }
+
+    public function rules(): array
+    {
+        return [
+            'lat' => ['required','numeric','between:-90,90'],
+            'lng' => ['required','numeric','between:-180,180'],
+            'species' => ['nullable','string','max:255'],
+            'length' => ['nullable','numeric'],
+            'weight' => ['nullable','numeric'],
+            'depth' => ['nullable','numeric'],
+            'style' => ['nullable','string','max:255'],
+            'lure' => ['nullable','string','max:255'],
+            'tackle' => ['nullable','string','max:255'],
+            'privacy' => ['required','in:all,friends'],
+            'caught_at' => ['nullable','date'],
+            'water_type' => ['nullable','string','max:255'],
+            'water_temp' => ['nullable','numeric'],
+            'wind_speed' => ['nullable','numeric'],
+            'pressure' => ['nullable','numeric'],
+            'companions' => ['nullable','string','max:255'],
+            'notes' => ['nullable','string'],
+            'photo' => ['nullable','file','image','max:8192'],
+            'photo_url' => ['nullable','string','max:255'],
+        ];
+    }
+}
+PHP
+}
+
+backend_routes() {
+  mkd routes
+  cat > routes/api.php <<'PHP'
+<?php
+
+use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\V1\FeedController;
+use App\Http\Controllers\Api\V1\CatchController;
+use App\Http\Controllers\Api\V1\MapController;
+use App\Http\Middleware\ForceJsonResponse;
+
+Route::middleware([ForceJsonResponse::class, 'throttle:api', \Fruitcake\Cors\HandleCors::class])->prefix('v1')->group(function () {
+
+    Route::get('/feed', [FeedController::class, 'index']);
+
+    Route::get('/map/icons', [MapController::class, 'icons']);
+    Route::get('/map/points', [MapController::class, 'points']);
+
+    Route::middleware('auth:sanctum')->group(function () {
+        Route::post('/catches', [CatchController::class, 'store']);
+    });
+});
+PHP
+}
+
+backend_handler_401() {
+  mkd app/Exceptions
+  cat > app/Exceptions/Handler.php <<'PHP'
+<?php
+
+namespace App\Exceptions;
+
+use Illuminate\Foundation\Exceptions\Handler as ExceptionHandler;
+use Throwable;
+use Illuminate\Auth\AuthenticationException;
+
+class Handler extends ExceptionHandler
+{
+    protected $levels = [];
+    protected $dontReport = [];
+    protected $dontFlash = [
+        'current_password',
+        'password',
+        'password_confirmation',
+    ];
+
+    public function register(): void
+    {
+        //
+    }
+
+    protected function unauthenticated($request, AuthenticationException $exception)
+    {
+        if ($request->expectsJson() || $request->is('api/*')) {
+            return response()->json(['message' => 'Unauthenticated.'], 401);
+        }
+        return redirect()->guest(route('login'));
+    }
+}
+PHP
+}
+
+backend_configs() {
+  mkd config
+  cat > config/cors.php <<'PHP'
+<?php
+
+return [
+    'paths' => [
+        'api/*',
+        'sanctum/csrf-cookie',
+    ],
+    'allowed_methods' => ['*'],
+    'allowed_origins' => [
+        'https://www.fishtrackpro.ru',
+        'https://fishtrackpro.ru',
+        'http://localhost:3000',
+        'http://localhost:5173',
+    ],
+    'allowed_origins_patterns' => [],
+    'allowed_headers' => ['*'],
+    'exposed_headers' => [],
+    'max_age' => 0,
+    'supports_credentials' => true,
+];
+PHP
+
+  cat > config/ui.php <<'PHP'
+<?php
+
+return [
+    'logo_url' => env('UI_LOGO_URL', '/images/logo.svg'),
+    'default_avatar' => env('UI_DEFAULT_AVATAR', '/images/default-avatar.png'),
+    'bg_pattern' => env('UI_BG_PATTERN', '/images/pattern.png'),
+];
+PHP
+
+  cat > config/map_icons.php <<'PHP'
+<?php
+
+/**
+ * Карта иконок для типов точек на карте.
+ * Для каждого типа можно указать строку (URL) или расширенный объект:
+ * ['url' => '...', 'size' => [w,h], 'anchor' => [x,y], 'popup' => [x,y]]
+ */
+return [
+    'types' => [
+        'spot' => [
+            'url' => env('ICON_SPOT', '/icons/spot.png'),
+            'size' => [32, 32],
+            'anchor' => [16, 32],
+            'popup' => [0, -28],
+        ],
+        'store' => [
+            'url' => env('ICON_STORE', '/icons/store.png'),
+            'size' => [28, 28],
+            'anchor' => [14, 28],
+            'popup' => [0, -24],
+        ],
+        'base' => env('ICON_BASE', '/icons/base.png'),
+        'slip' => env('ICON_SLIP', '/icons/slip.png'),
+        'farm' => env('ICON_FARM', '/icons/farm.png'),
+        'event' => [
+            'url' => env('ICON_EVENT', '/icons/event.png'),
+            'size' => [30, 30],
+            'anchor' => [15, 30],
+            'popup' => [0, -26],
+        ],
+        'club' => env('ICON_CLUB', '/icons/club.png'),
+        'highlight' => [
+            'url' => env('ICON_HIGHLIGHT', '/icons/highlight.png'),
+            'size' => [36, 36],
+            'anchor' => [18, 36],
+            'popup' => [0, -32],
+        ],
+    ],
+    'default' => [
+        'url' => env('ICON_DEFAULT', '/icons/default.png'),
+        'size' => [26, 26],
+        'anchor' => [13, 26],
+        'popup' => [0, -22],
+    ],
+];
+PHP
+
+  if ! grep -q "UI_LOGO_URL" .env.example 2>/dev/null; then
+    cat >> .env.example <<'ENV'
+
+# --- UI assets ---
+UI_LOGO_URL=/images/logo.svg
+UI_DEFAULT_AVATAR=/images/default-avatar.png
+UI_BG_PATTERN=/images/pattern.png
+
+# --- Map icons ---
+ICON_DEFAULT=/icons/default.png
+ICON_SPOT=/icons/spot.png
+ICON_STORE=/icons/store.png
+ICON_BASE=/icons/base.png
+ICON_SLIP=/icons/slip.png
+ICON_FARM=/icons/farm.png
+ICON_EVENT=/icons/event.png
+ICON_CLUB=/icons/club.png
+ICON_HIGHLIGHT=/icons/highlight.png
+
+# --- Frontend/CORS ---
+FRONTEND_URL=https://www.fishtrackpro.ru
+APP_URL_API=https://api.fishtrackpro.ru
+ENV
+  fi
+}
+
+backend_all() {
+  backend_middleware
+  backend_resource
+  backend_controllers
+  backend_request_rules
+  backend_routes
+  backend_handler_401
+  backend_configs
+  green "✅ Бэкенд файлы обновлены."
+  yellow "ℹ Не забудьте: composer require fruitcake/laravel-cors && php artisan config:clear route:clear cache:clear && php artisan storage:link"
+}
+
+# ---------- Фронтенд ----------
+frontend_api() {
+  mkd src/api
+  cat > src/api/api.ts <<'TS'
+export interface CatchItem {
+  id: number;
+  user_id: number;
+  user_name: string;
+  user_avatar: string;
+  lat: number;
+  lng: number;
+  species?: string;
+  length?: number;
+  weight?: number;
+  depth?: number;
+  method?: string;
+  bait?: string;
+  gear?: string;
+  water_type?: string;
+  water_temp?: number;
+  wind_speed?: number;
+  pressure?: number;
+  companions?: string;
+  caption?: string;
+  media_url?: string;
+  privacy: 'all'|'friends';
+  caught_at?: string | null;
+  created_at: string;
+  likes_count: number;
+  comments_count: number;
+  liked_by_me: boolean;
+}
+
+export interface MapIcons {
+  types: Record<string, string | { url: string; size?: [number,number]; anchor?: [number,number]; popup?: [number,number]; }>;
+  default: string | { url: string; size?: [number,number]; anchor?: [number,number]; popup?: [number,number]; };
+}
+
+export interface MapPoint {
+  id: number;
+  type: string;
+  lat: number;
+  lng: number;
+  title: string;
+  descr?: string;
+  highlight?: boolean;
+  source: 'fishing_points'|'stores'|'events';
+}
+
+const API_BASE = import.meta.env.VITE_API_BASE ?? 'https://api.fishtrackpro.ru/api/v1';
+
+async function http<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' , ...(init?.headers||{}) },
-    ...init
+    headers: {
+      ...(opts.headers ?? {}),
+    },
+    ...opts
   });
   if (!res.ok) {
-    let p = null; try { p = await res.text(); } catch {}
-    console.error('HTTP', res.status, path, p);
-    throw new Error(String(res.status));
+    const text = await res.text().catch(()=>'');
+    throw new Error(text || `HTTP ${res.status}`);
   }
-  const ct = res.headers.get('content-type')||'';
-  return ct.includes('application/json') ? res.json() : res.text();
+  return res.json();
 }
 
-export const api = {
-  points: (params: {limit?:number; filter?:string; bbox?: string}) => {
-    const q = new URLSearchParams();
-    if (params.limit) q.set('limit', String(params.limit));
-    if (params.filter) q.set('filter', params.filter);
-    if (params.bbox) q.set('bbox', params.bbox);
-    return req(`/map/points?${q.toString()}`);
-  },
-  feed: (params: {limit?:number; offset?:number}) => {
-    const q = new URLSearchParams();
-    if (params.limit!=null) q.set('limit', String(params.limit));
-    if (params.offset!=null) q.set('offset', String(params.offset));
-    return req(`/feed?${q.toString()}`);
-  },
-  catchById: (id:number) => req(`/catch/${id}`),
-  addComment: (id:number, text:string, parent_id?:number|null) =>
-    req(`/catch/${id}/comments`, { method:'POST', body: JSON.stringify({ text, parent_id: parent_id ?? null }) }),
+export async function fetchFeed(limit=10, offset=0) {
+  return http<CatchItem[]>(`/feed?limit=${limit}&offset=${offset}`);
+}
 
-  weather: (lat:number,lng:number, dt?:number) => {
-    const q = new URLSearchParams({ lat:String(lat), lng:String(lng) });
-    if (dt) q.set('dt', String(dt));
-    return req(`/weather?${q.toString()}`);
+export async function createCatch(form: FormData) {
+  const res = await fetch(`${API_BASE}/catches`, {
+    method: 'POST',
+    body: form,
+    credentials: 'include'
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(()=>'');
+    throw new Error(text || `HTTP ${res.status}`);
   }
+  return res.json() as Promise<CatchItem>;
+}
+
+export async function fetchMapIcons() {
+  return http<MapIcons>('/map/icons');
+}
+
+export async function fetchMapPoints(limit=2000, offset=0) {
+  return http<{items: MapPoint[]}>(`/map/points?limit=${limit}&offset=${offset}`);
 }
 TS
-
-########################################
-# FRONTEND: Реальная карта (MapView.tsx) на react-leaflet
-########################################
-cat > "$STAGE/frontend/src/components/MapView.tsx" <<'TSX'
-import React, { useEffect } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
-import 'leaflet/dist/leaflet.css';
-import L from 'leaflet';
-
-// фиксим иконки leaflet (без webpack loaders)
-const icon = new L.Icon({
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-  shadowSize: [41, 41],
-  shadowAnchor: [12, 41],
-});
-
-function FitBounds({ bbox }: { bbox?: [number,number,number,number] }) {
-  const map = useMap();
-  useEffect(()=>{
-    if (!bbox) return;
-    const [[minLat,minLng],[maxLat,maxLng]] = [[bbox[1],bbox[0]],[bbox[3],bbox[2]]];
-    map.fitBounds([[minLat,minLng],[maxLat,maxLng]], { padding:[24,24] });
-  },[bbox]);
-  return null;
 }
 
-type Point = {
-  id:number; title:string; lat:number; lng:number; category?:string;
-};
-export default function MapView({
-  points, center=[55.751244,37.618423], zoom=11, bbox
-}:{ points:Point[]; center?:[number,number]; zoom?:number; bbox?:[number,number,number,number]}) {
-  return (
-    <div className="relative w-full h-full">
-      <MapContainer
-        center={center}
-        zoom={zoom}
-        className="w-full h-full rounded-2xl overflow-hidden"
-        zoomControl={false}
-      >
-        <TileLayer
-          attribution='&copy; CARTO & OpenStreetMap'
-          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-        />
-        {points.map(p=>(
-          <Marker key={p.id} position={[p.lat, p.lng]} icon={icon}>
-            <Popup>
-              <div className="text-sm">
-                <div className="font-semibold">{p.title || 'Точка'}</div>
-                {p.category && <div className="text-xs text-gray-500 mt-1">Категория: {p.category}</div>}
-              </div>
-            </Popup>
-          </Marker>
-        ))}
-        <FitBounds bbox={bbox}/>
-      </MapContainer>
-    </div>
-  );
-}
-TSX
+frontend_screens() {
+  mkd src/screens
+  cat > src/screens/FeedScreen.tsx <<'TSX'
+import { useEffect, useState } from 'react';
+import { fetchFeed, CatchItem } from '../api/api';
 
-########################################
-# FRONTEND: Шапка с кликом на "Погода"
-########################################
-cat > "$STAGE/frontend/src/components/Header.tsx" <<'TSX'
-import React from 'react';
+export default function FeedScreen() {
+  const [items, setItems] = useState<CatchItem[]>([]);
+  const [error, setError] = useState<string>('');
 
-export default function Header({ onLogoClick }:{ onLogoClick?:()=>void }) {
-  return (
-    <div className="fixed top-0 left-0 right-0 z-40">
-      <div className="mx-auto max-w-screen-sm px-4 pt-3">
-        <div className="backdrop-blur-xl bg-white/60 border border-white/40 rounded-2xl shadow-sm px-3 py-2 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <button onClick={onLogoClick} className="font-semibold text-gray-900">FishTrack Pro</button>
-            <span className="text-xs px-2 py-1 rounded-full bg-gradient-to-r from-pink-400 to-fuchsia-500 text-white">beta</span>
-          </div>
-          <div className="flex items-center gap-4">
-            <button
-              className="text-sm text-gray-700 hover:text-gray-900"
-              onClick={() => { window.location.hash = '#/weather'; }}
-              aria-label="Открыть погоду"
-              title="Погода"
-            >
-              ☁️ Погода
-            </button>
-            <button
-              className="text-sm text-gray-700 hover:text-gray-900"
-              onClick={() => { window.location.hash = '#/alerts'; }}
-              aria-label="Уведомления"
-              title="Уведомления"
-            >
-              🔔
-            </button>
-            <button
-              className="text-sm text-gray-700 hover:text-gray-900"
-              onClick={() => { window.location.hash = '#/profile'; }}
-              aria-label="Профиль"
-              title="Профиль"
-            >
-              🧑‍✈️
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-TSX
-
-########################################
-# FRONTEND: WeatherScreen.tsx — вывод температуры/ветра
-########################################
-cat > "$STAGE/frontend/src/screens/WeatherScreen.tsx" <<'TSX'
-import React, { useEffect, useState } from 'react';
-import { api } from '../lib/api';
-
-type SavedLocation = { id:string; name:string; lat:number; lng:number };
-type WX = { temp_c?:number; wind_ms?:number; pressure?:number; source?:string };
-
-function loadLocations(): SavedLocation[] {
-  try {
-    const raw = localStorage.getItem('wx_locations');
-    if (!raw) return [];
-    const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? arr : [];
-  } catch { return []; }
-}
-
-function saveLocations(list: SavedLocation[]) {
-  localStorage.setItem('wx_locations', JSON.stringify(list));
-}
-
-export default function WeatherScreen(){
-  const [locations, setLocations] = useState<SavedLocation[]>(loadLocations());
-  const [data, setData] = useState<Record<string, WX>>({});
-  const [name, setName] = useState('');
-  const [coords, setCoords] = useState<{lat?:number; lng?:number}>({});
-
-  useEffect(()=>{
-    (async()=>{
-      const out: Record<string,WX> = {};
-      for (const loc of locations) {
-        try {
-          const j = await api.weather(loc.lat, loc.lng);
-          // Нормализуем (ожидаем from backend { temp_c, wind_ms, pressure, source })
-          out[loc.id] = {
-            temp_c: j?.temp_c ?? j?.main?.temp ?? null,
-            wind_ms: j?.wind_ms ?? j?.wind?.speed ?? null,
-            pressure: j?.pressure ?? j?.main?.pressure ?? null,
-            source: j?.source ?? 'openweather'
-          };
-        } catch(e){
-          out[loc.id] = { temp_c: undefined, wind_ms: undefined, source:'error' };
-        }
+  useEffect(() => {
+    (async () => {
+      try {
+        const data = await fetchFeed(10, 0);
+        setItems(data);
+      } catch (e:any) {
+        console.error('feed error', e);
+        setError('Не удалось загрузить ленту');
       }
-      setData(out);
     })();
-  },[locations]);
+  }, []);
 
-  const add = ()=>{
-    if (!name || coords.lat==null || coords.lng==null) return;
-    const id = `${Date.now()}`;
-    const next = [...locations, { id, name, lat:coords.lat, lng:coords.lng }];
-    setLocations(next); saveLocations(next);
-    setName(''); setCoords({});
-  };
-
-  const remove = (id:string)=>{
-    const next = locations.filter(l=>l.id!==id);
-    setLocations(next); saveLocations(next);
-  };
+  if (error) return <div className="p-4 text-red-600">{error}</div>;
 
   return (
-    <div className="pt-20 pb-4 px-4 max-w-screen-sm mx-auto">
-      <h1 className="text-xl font-semibold mb-3">Погода</h1>
-
-      <div className="backdrop-blur-xl bg-white/60 border border-white/40 rounded-2xl p-3 mb-4">
-        <div className="grid grid-cols-1 gap-2">
-          <input
-            className="px-3 py-2 rounded-xl border border-gray-200"
-            placeholder="Название локации"
-            value={name} onChange={e=>setName(e.target.value)}
-          />
-          <div className="grid grid-cols-2 gap-2">
-            <input
-              className="px-3 py-2 rounded-xl border border-gray-200"
-              placeholder="Широта (lat)" inputMode="decimal"
-              value={coords.lat ?? ''} onChange={e=>setCoords(s=>({...s,lat:parseFloat(e.target.value)}))}
-            />
-            <input
-              className="px-3 py-2 rounded-xl border border-gray-200"
-              placeholder="Долгота (lng)" inputMode="decimal"
-              value={coords.lng ?? ''} onChange={e=>setCoords(s=>({...s,lng:parseFloat(e.target.value)}))}
-            />
-          </div>
-          <button
-            className="px-3 py-2 rounded-xl bg-gradient-to-r from-pink-500 to-fuchsia-600 text-white font-medium"
-            onClick={add}
-          >
-            Добавить локацию
-          </button>
-        </div>
-      </div>
-
-      <div className="space-y-3">
-        {locations.map(loc=>{
-          const wx = data[loc.id];
-          return (
-            <div key={loc.id} className="backdrop-blur-xl bg-white/60 border border-white/40 rounded-2xl p-3 flex items-center justify-between">
-              <div>
-                <div className="font-medium">{loc.name}</div>
-                <div className="text-xs text-gray-500">{loc.lat.toFixed(4)}, {loc.lng.toFixed(4)}</div>
-              </div>
-              <div className="text-right">
-                <div className="text-sm">
-                  {wx?.temp_c!=null ? `${Math.round(wx.temp_c)}°C` : '— °C'}
-                </div>
-                <div className="text-xs text-gray-500">
-                  {wx?.wind_ms!=null ? `${wx.wind_ms.toFixed(1)} м/с` : '— м/с'}
-                </div>
-                <div className="text-[10px] text-gray-400">{wx?.source || ''}</div>
-              </div>
-              <button
-                className="ml-3 text-sm text-red-500 hover:text-red-600"
-                onClick={()=>remove(loc.id)}
-                title="Удалить"
-              >✕</button>
+    <div className="p-4 space-y-4">
+      {items.map(it => (
+        <article key={it.id} className="border rounded-xl p-4 shadow-sm">
+          <header className="flex items-center gap-3">
+            <img src={it.user_avatar || '/images/default-avatar.png'} className="w-10 h-10 rounded-full object-cover" />
+            <div>
+              <div className="font-semibold">{it.user_name}</div>
+              <div className="text-xs text-gray-500">{new Date(it.created_at).toLocaleString()}</div>
             </div>
-          );
-        })}
-        {locations.length===0 && (
-          <div className="text-center text-gray-500">Добавьте локации, чтобы видеть температуру и ветер</div>
-        )}
-      </div>
-    </div>
-  );
-}
-TSX
-
-########################################
-# FRONTEND: MapScreen.tsx (встраиваем реальную карту)
-########################################
-cat > "$STAGE/frontend/src/screens/MapScreen.tsx" <<'TSX'
-import React, { useEffect, useMemo, useState } from 'react';
-import { api } from '../lib/api';
-import MapView from '../components/MapView';
-
-type Point = { id:number; title:string; lat:number; lng:number; category?:string; };
-
-export default function MapScreen(){
-  const [points, setPoints] = useState<Point[]>([]);
-  const [bbox, setBbox] = useState<[number,number,number,number] | undefined>(undefined);
-  const [filter, setFilter] = useState<string|undefined>(undefined);
-
-  useEffect(()=>{
-    // Пример bbox для Москвы (если нет гео)
-    const fallbackBbox:[number,number,number,number] = [37.2,55.5,37.9,55.95];
-    const load = async ()=>{
-      const params:any = { limit: 500, bbox: (bbox||fallbackBbox).join(',') };
-      if (filter) params.filter = filter;
-      const j = await api.points(params);
-      setPoints(j.items || []);
-    };
-    load().catch(console.error);
-  },[bbox, filter]);
-
-  // UI для фильтров (минимально)
-  const filters = useMemo(()=>[
-    {key:undefined, title:'Все'},
-    {key:'spot', title:'Споты'},
-    {key:'shop', title:'Магазины'},
-    {key:'slip', title:'Слипы'},
-    {key:'camp', title:'Кемпинги'},
-    {key:'catch', title:'Уловы'},
-  ],[]);
-
-  return (
-    <div className="w-full h-full pt-16 pb-16">
-      <div className="absolute top-16 left-0 right-0 z-30 px-4">
-        <div className="overflow-x-auto no-scrollbar">
-          <div className="inline-flex gap-2 backdrop-blur-xl bg-white/60 border border-white/40 rounded-2xl p-2">
-            {filters.map(f=>(
-              <button
-                key={String(f.key)}
-                onClick={()=>setFilter(f.key as any)}
-                className={`px-3 py-1 rounded-xl text-sm ${filter===f.key ? 'bg-gradient-to-r from-pink-500 to-fuchsia-600 text-white' : 'bg-white/70 text-gray-800 border border-white/60'}`}
-              >
-                {f.title}
-              </button>
-            ))}
+          </header>
+          {it.media_url && (
+            <div className="mt-3">
+              <img src={it.media_url} className="w-full rounded-lg object-cover" />
+            </div>
+          )}
+          <div className="mt-3 text-sm">
+            {it.caption}
           </div>
-        </div>
-      </div>
-
-      <div className="absolute inset-0 top-16 bottom-16 z-10">
-        <MapView points={points} bbox={bbox}/>
-      </div>
+          <footer className="mt-3 text-xs text-gray-500 flex gap-4">
+            <span>👍 {it.likes_count}</span>
+            <span>💬 {it.comments_count}</span>
+            <span>🐟 {it.species || '—'}</span>
+            <span>🔒 {it.privacy}</span>
+          </footer>
+        </article>
+      ))}
     </div>
   );
 }
 TSX
 
-########################################
-# FRONTEND: Простой App header + маршрутизация по hash
-########################################
-cat > "$STAGE/frontend/src/App.tsx" <<'TSX'
-import React, { useEffect, useState } from 'react';
-import Header from './components/Header';
-import MapScreen from './screens/MapScreen';
-import WeatherScreen from './screens/WeatherScreen';
+  cat > src/screens/AddCatchForm.tsx <<'TSX'
+import { useState } from 'react';
+import { createCatch } from '../api/api';
 
-function useHash(): string {
-  const [h,setH]=useState(window.location.hash||'#/map');
-  useEffect(()=>{
-    const on = ()=>setH(window.location.hash||'#/map');
-    window.addEventListener('hashchange',on);
-    return ()=>window.removeEventListener('hashchange',on);
-  },[]);
-  return h;
-}
+export default function AddCatchForm() {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>('');
+  const [ok, setOk] = useState<string>('');
 
-export default function App(){
-  const hash = useHash();
-  const route = hash.replace(/^#\//,'') || 'map';
+  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setBusy(true); setError(''); setOk('');
+    const form = new FormData(e.currentTarget);
+    try {
+      await createCatch(form);
+      setOk('Улов добавлен!');
+      e.currentTarget.reset();
+    } catch (e:any) {
+      console.error(e);
+      setError('Ошибка при добавлении улова');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
-    <div className="w-full h-screen relative bg-gray-50">
-      <Header />
-      {route==='map' && <MapScreen/>}
-      {route==='weather' && <WeatherScreen/>}
-      {route!=='map' && route!=='weather' && (
-        <div className="pt-20 px-4 text-gray-500">Страница в разработке</div>
-      )}
+    <form onSubmit={onSubmit} className="p-4 space-y-3 max-w-2xl">
+      {error && <div className="text-red-600">{error}</div>}
+      {ok && <div className="text-green-700">{ok}</div>}
+
+      <div className="grid grid-cols-2 gap-3">
+        <label className="flex flex-col">
+          <span>Широта (lat)*</span>
+          <input name="lat" type="number" step="any" required className="border rounded p-2" />
+        </label>
+        <label className="flex flex-col">
+          <span>Долгота (lng)*</span>
+          <input name="lng" type="number" step="any" required className="border rounded p-2" />
+        </label>
+
+        <label className="flex flex-col">
+          <span>Вид рыбы (species)</span>
+          <input name="species" className="border rounded p-2" />
+        </label>
+        <label className="flex flex-col">
+          <span>Длина (length, см)</span>
+          <input name="length" type="number" step="any" className="border rounded p-2" />
+        </label>
+
+        <label className="flex flex-col">
+          <span>Вес (weight, кг)</span>
+          <input name="weight" type="number" step="any" className="border rounded p-2" />
+        </label>
+        <label className="flex flex-col">
+          <span>Глубина (depth, м)</span>
+          <input name="depth" type="number" step="any" className="border rounded p-2" />
+        </label>
+
+        <label className="flex flex-col">
+          <span>Метод (style)</span>
+          <input name="style" className="border rounded p-2" />
+        </label>
+        <label className="flex flex-col">
+          <span>Приманка (lure)</span>
+          <input name="lure" className="border rounded p-2" />
+        </label>
+
+        <label className="flex flex-col">
+          <span>Снасть (tackle)</span>
+          <input name="tackle" className="border rounded p-2" />
+        </label>
+        <label className="flex flex-col">
+          <span>Приватность*</span>
+          <select name="privacy" required className="border rounded p-2">
+            <option value="all">all</option>
+            <option value="friends">friends</option>
+          </select>
+        </label>
+
+        <label className="flex flex-col">
+          <span>Тип воды (water_type)</span>
+          <input name="water_type" className="border rounded p-2" />
+        </label>
+        <label className="flex flex-col">
+          <span>Температура воды (°C)</span>
+          <input name="water_temp" type="number" step="any" className="border rounded p-2" />
+        </label>
+
+        <label className="flex flex-col">
+          <span>Скорость ветра (м/с)</span>
+          <input name="wind_speed" type="number" step="any" className="border rounded p-2" />
+        </label>
+        <label className="flex flex-col">
+          <span>Давление (hPa)</span>
+          <input name="pressure" type="number" step="any" className="border rounded p-2" />
+        </label>
+
+        <label className="flex flex-col">
+          <span>Компаньоны</span>
+          <input name="companions" className="border rounded p-2" />
+        </label>
+        <label className="flex flex-col">
+          <span>Дата/время поимки</span>
+          <input name="caught_at" type="datetime-local" className="border rounded p-2" />
+        </label>
+      </div>
+
+      <label className="flex flex-col">
+        <span>Заметки</span>
+        <textarea name="notes" className="border rounded p-2" rows={3} />
+      </label>
+
+      <div className="grid grid-cols-2 gap-3">
+        <label className="flex flex-col">
+          <span>Фото (файл)</span>
+          <input name="photo" type="file" accept="image/*" className="border rounded p-2" />
+        </label>
+        <label className="flex flex-col">
+          <span>Или ссылка на фото (photo_url)</span>
+          <input name="photo_url" className="border rounded p-2" />
+        </label>
+      </div>
+
+      <button className="px-4 py-2 rounded bg-blue-600 text-white">
+        Добавить улов
+      </button>
+    </form>
+  );
+}
+TSX
+}
+
+frontend_map() {
+  mkd src/components
+  cat > src/components/MapScreen.tsx <<'TSX'
+import { useEffect, useRef, useState } from 'react';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+import { fetchMapIcons, fetchMapPoints, MapPoint } from '../api/api';
+
+const TILE_URL = import.meta.env.VITE_OSM_TILES ?? 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+const TILE_ATTR = import.meta.env.VITE_OSM_ATTR ?? '&copy; OpenStreetMap contributors';
+
+type IconCfg = string | { url: string; size?: [number, number]; anchor?: [number, number]; popup?: [number, number]; };
+type IconConfigPayload = { types: Record<string, IconCfg>; default: IconCfg };
+
+function toLeafletIcon(cfg: IconCfg): L.Icon {
+  const base = typeof cfg === 'string' ? { url: cfg } : cfg;
+  const size = (base as any).size ?? [32, 32];
+  const anchor = (base as any).anchor ?? [size[0] / 2, size[1]];
+  const popup = (base as any).popup ?? [0, - Math.max(22, Math.round(size[1] * 0.8))];
+  return L.icon({
+    iconUrl: (base as any).url,
+    iconSize: size as L.PointTuple,
+    iconAnchor: anchor as L.PointTuple,
+    popupAnchor: popup as L.PointTuple,
+  });
+}
+
+export default function MapScreen() {
+  const mapEl = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<L.Map | null>(null);
+  const [error, setError] = useState<string>('');
+
+  useEffect(() => {
+    if (!mapEl.current) return;
+
+    const map = L.map(mapEl.current).setView([55.751244, 37.618423], 5);
+    mapRef.current = map;
+
+    L.tileLayer(TILE_URL, {
+      attribution: TILE_ATTR,
+      maxZoom: 19,
+    }).addTo(map);
+
+    (async () => {
+      try {
+        const iconsCfg = (await fetchMapIcons()) as unknown as IconConfigPayload;
+        const res = await fetchMapPoints(2000, 0);
+
+        const cache: Record<string, L.Icon> = {};
+        const makeIcon = (type: string) => {
+          if (cache[type]) return cache[type];
+          const cfg: IconCfg = iconsCfg.types[type] ?? iconsCfg.default;
+          const icon = toLeafletIcon(cfg);
+          cache[type] = icon;
+          return icon;
+        };
+
+        res.items.forEach((p: MapPoint) => {
+          const t = p.highlight ? 'highlight' : p.type;
+          const marker = L.marker([p.lat, p.lng], { icon: makeIcon(t) });
+          const html = `
+            <div>
+              <strong>${p.title ?? ''}</strong><br/>
+              <small>${p.descr ?? ''}</small><br/>
+              <span>Тип: ${p.type}</span>
+            </div>
+          `;
+          marker.bindPopup(html);
+          marker.addTo(map);
+        });
+      } catch (e:any) {
+        console.error(e);
+        setError('Не удалось загрузить карту/точки');
+      }
+    })();
+
+    return () => {
+      map.remove();
+      mapRef.current = null;
+    };
+  }, []);
+
+  return (
+    <div className="w-full h-[80vh]">
+      {error && <div className="p-2 text-red-600">{error}</div>}
+      <div ref={mapEl} className="w-full h-full rounded-xl overflow-hidden shadow" />
     </div>
   );
 }
 TSX
-
-########################################
-# FRONTEND: Глобальные стили (фикс z-index карты)
-########################################
-cat > "$STAGE/frontend/src/styles/global.css" <<'CSS'
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-/* импортируем до пользовательских правил — чтобы не ругался postcss */
-@import "leaflet/dist/leaflet.css";
-
-/* UI над картой */
-.leaflet-container { z-index: 0; }
-.no-scrollbar::-webkit-scrollbar { display: none; }
-.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-CSS
-
-########################################
-# FRONTEND: index.tsx (точка входа)
-########################################
-cat > "$STAGE/frontend/src/index.tsx" <<'TSX'
-import React from 'react';
-import { createRoot } from 'react-dom/client';
-import App from './App';
-import './styles/global.css';
-
-const el = document.getElementById('root');
-if (el) {
-  const root = createRoot(el);
-  root.render(<App />);
 }
-TSX
 
-########################################
-# FRONTEND: public/index.html (минимальный шаблон)
-########################################
-cat > "$STAGE/frontend/public/index.html" <<'HTML'
-<!doctype html>
-<html lang="ru">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no" />
-    <title>FishTrack Pro</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/index.tsx"></script>
-  </body>
-</html>
-HTML
+frontend_env() {
+  cat > .env.example <<'ENV'
+VITE_API_BASE=https://api.fishtrackpro.ru/api/v1
+VITE_OSM_TILES=https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png
+VITE_OSM_ATTR=&copy; OpenStreetMap contributors
+ENV
+}
 
-########################################
-# Готовим zip
-########################################
-rm -f "$ZIP_NAME"
-( cd "$STAGE" && zip -qr "../$ZIP_NAME" . )
-echo "OK -> $ZIP_NAME"
+frontend_all() {
+  frontend_api
+  frontend_screens
+  frontend_map
+  frontend_env
+  green "✅ Фронтенд файлы обновлены."
+  yellow "ℹ Установите зависимости: npm i leaflet"
+}
+
+# ---------- Nginx ----------
+nginx_make() {
+  mkd nginx
+  cat > nginx/api.fishtrackpro.ru.conf <<'NGINX'
+server {
+    listen 80;
+    server_name api.fishtrackpro.ru;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name api.fishtrackpro.ru;
+
+    ssl_certificate     /etc/letsencrypt/live/api.fishtrackpro.ru/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.fishtrackpro.ru/privkey.pem;
+
+    root /var/www/fishtrackpro/public;
+    index index.php;
+
+    add_header X-Frame-Options SAMEORIGIN;
+    add_header X-Content-Type-Options nosniff;
+
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    location ~ \.php$ {
+        include fastcgi_params;
+        fastcgi_pass unix:/run/php/php8.2-fpm.sock;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_param DOCUMENT_ROOT $document_root;
+    }
+
+    if ($request_method = OPTIONS) {
+        add_header Access-Control-Allow-Origin "https://www.fishtrackpro.ru";
+        add_header Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS";
+        add_header Access-Control-Allow-Headers "Authorization, Content-Type, X-Requested-With";
+        add_header Access-Control-Allow-Credentials "true";
+        return 204;
+    }
+}
+NGINX
+
+  cat > nginx/www.fishtrackpro.ru.conf <<'NGINX'
+server {
+    listen 80;
+    server_name fishtrackpro.ru www.fishtrackpro.ru;
+    return 301 https://www.fishtrackpro.ru$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name www.fishtrackpro.ru;
+
+    ssl_certificate     /etc/letsencrypt/live/www.fishtrackpro.ru/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/www.fishtrackpro.ru/privkey.pem;
+
+    root /var/www/fishtrackpro-web/dist;
+    index index.html;
+
+    location / {
+        try_files $uri /index.html;
+    }
+}
+NGINX
+
+  green "✅ Nginx конфиги сгенерированы в ./nginx/"
+}
+
+# ---------- Роутер команд ----------
+cmd="${1:-all}"
+case "$cmd" in
+  backend) backend_all ;;
+  frontend) frontend_all ;;
+  nginx) nginx_make ;;
+  all)
+    backend_all
+    frontend_all
+    nginx_make
+    ;;
+  *)
+    red "Неизвестная команда: $cmd"
+    echo "Использование: $0 [all|backend|frontend|nginx]"
+    exit 1
+    ;;
+esac
+
+green "🎣 Готово. Проверьте .env, выполните artisan команды, установите зависимости фронта и перезапустите Nginx."
