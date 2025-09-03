@@ -72,7 +72,7 @@ Route::get('/user/{id}/markers', [UserCatchesController::class, 'markers']);
     });
 
     // Карта
-    Route::get('/map/points', [MapController::class, 'index']);
+    Route::get('/map/points',[PointsController::class,'index']);
     Route::post('/map/points', [MapController::class, 'store']);            // если нужно
     Route::get('/map/points/{id}', [MapController::class, 'show']);
 
