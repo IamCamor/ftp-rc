@@ -2,90 +2,30 @@
 
 return [
 
-    /*
-    |--------------------------------------------------------------------------
-    | CORS Paths
-    |--------------------------------------------------------------------------
-    |
-    | Пути, к которым применяется CORS. Добавлены API и OAuth-роуты.
-    |
-    */
-    'paths' => [
-        'api/*',
-        'auth/*',
-        'sanctum/csrf-cookie',
-    ],
+    'paths' => ['api/*', 'oauth/*', 'sanctum/csrf-cookie'],
 
-    /*
-    |--------------------------------------------------------------------------
-    | Allowed Methods
-    |--------------------------------------------------------------------------
-    */
     'allowed_methods' => ['*'],
 
-    /*
-    |--------------------------------------------------------------------------
-    | Allowed Origins
-    |--------------------------------------------------------------------------
-    |
-    | Используем переменную окружения CORS_ALLOWED_ORIGINS со списком
-    | через запятую. Пример:
-    | CORS_ALLOWED_ORIGINS=https://fishtrackpro.ru,https://www.fishtrackpro.ru,http://localhost:5173
-    |
-    */
-   'allowed_origins' => array_filter(array_map('trim', explode(',', env('CORS_ALLOWED_ORIGINS',
-        'https://api.fishtrackpro.ru,https://fishtrackpro.ru,https://www.fishtrackpro.ru,http://localhost:5173'
-    )))),
-
-    /*
-    |--------------------------------------------------------------------------
-    | Allowed Origins Patterns
-    |--------------------------------------------------------------------------
-    |
-    | Если хотите разрешить все поддомены:
-    | 'allowed_origins_patterns' => ['~^https://.*\.fishtrackpro\.ru$~'],
-    |
-    */
-    'allowed_origins_patterns' => [
-        // пример: '~^https://.*\.fishtrackpro\.ru$~'
+    'allowed_origins' => [
+        'https://www.fishtrackpro.ru',
+        'https://fishtrackpro.ru',
+        'https://app.fishtrackpro.ru',
+        'https://api.fishtrackpro.ru',
     ],
 
-    /*
-    |--------------------------------------------------------------------------
-    | Allowed Headers
-    |--------------------------------------------------------------------------
-    */
-    'allowed_headers' => ['*'],
+    'allowed_origins_patterns' => [],
 
-    /*
-    |--------------------------------------------------------------------------
-    | Exposed Headers
-    |--------------------------------------------------------------------------
-    |
-    | Заголовки, доступные JS после CORS — добавим Authorization, если нужно.
-    |
-    */
-    'exposed_headers' => ['Authorization'],
+    'allowed_headers' => [
+        'Content-Type', 'X-Requested-With', 'Authorization',
+        'Accept', 'Origin', 'Referer', 'User-Agent', 'Cache-Control',
+    ],
 
-    /*
-    |--------------------------------------------------------------------------
-    | Max Age
-    |--------------------------------------------------------------------------
-    |
-    | В секундах: как долго браузер может кэшировать preflight-ответ.
-    |
-    */
-    'max_age' => 86400,
+    // если токены/куки между доменами НЕ нужны — оставь false
+    // если нужны cookie/Authorization с кросс-домена — поставь true
+    'supports_credentials' => false,
 
-    /*
-    |--------------------------------------------------------------------------
-    | Supports Credentials
-    |--------------------------------------------------------------------------
-    |
-    | true — разрешить cookie/Authorization при кросс-доменных запросах.
-    | Для Bearer-токенов не обязательно, но включим на будущее.
-    |
-    */
-    'supports_credentials' => true,
+    'exposed_headers' => ['Link','X-RateLimit-Limit','X-RateLimit-Remaining'],
 
+    // чтобы не резать preflight: хотя бы на 10 минут
+    'max_age' => 600,
 ];
