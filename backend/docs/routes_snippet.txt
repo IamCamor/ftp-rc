@@ -1,0 +1,14 @@
+// === ADD to routes/api.php inside Route::prefix('v1')->group(...) ===
+// Ratings
+Route::get('/rating', [\App\Http\Controllers\Api\RatingController::class, 'index']);
+
+// Friends
+Route::get('/friends', [\App\Http\Controllers\Api\FriendsController::class, 'index']);
+Route::get('/friends/suggest', [\App\Http\Controllers\Api\FriendsController::class, 'suggest']);
+
+// Comments (with AI moderation already in controller)
+Route::post('/catch/{id}/comments', [\App\Http\Controllers\Api\CommentController::class, 'store']); // replaces previous if existed
+
+// Upload & Weather (robust, safe even without keys)
+Route::post('/upload', [\App\Http\Controllers\Api\UploadController::class, 'store']);
+Route::get('/weather', [\App\Http\Controllers\Api\WeatherProxyController::class, 'show']);

@@ -7,17 +7,21 @@ use Illuminate\Support\Facades\Storage;
 
 class UploadController extends Controller
 {
-    public function store(Request $r)
+    public function store(Request $request)
     {
-        $r->validate(['file'=>'required|file|max:'.(int)env('FILES_UPLOAD_MAX',10485760)]);
-        $f = $r->file('file');
-        $ext = strtolower($f->getClientOriginalExtension());
-        $isVideo = in_array($ext,['mp4','mov','webm','mkv']);
-        $path = $f->store($isVideo?'uploads/videos':'uploads/photos','public');
-        return response()->json([
-            'ok'=>true,
-            'url'=>Storage::disk('public')->url($path),
-            'type'=>$isVideo?'video':'image'
-        ]);
+        $files = $request->file('files', []);
+        $single = $request->file('file');
+        if ($single) $files[] = $single;
+
+        if (empty($files)) {
+            return response()->json(['ok' => false, 'error' => 'no_files'], 422);
+        }
+
+        $urls = [];
+        foreach ($files as $file) {
+            $path = $file->store('public/uploads');
+            $urls[] = Storage::url($path);
+        }
+        return response()->json(['ok' => true, 'urls' => $urls], 201);
     }
 }

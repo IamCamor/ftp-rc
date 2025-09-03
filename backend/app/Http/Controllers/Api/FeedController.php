@@ -9,46 +9,22 @@ class FeedController extends Controller
 {
     public function index(Request $r)
     {
-        $limit = min(50,(int)$r->query('limit',20));
-        $offset = max(0,(int)$r->query('offset',0));
-        $species = $r->query('species');
-        $userId  = $r->query('user_id');
-        $placeId = $r->query('place_id');
+        $limit = (int) $r->query('limit', 20);
+        $offset = (int) $r->query('offset', 0);
 
-        $q = DB::table('catch_records AS cr')
-            ->leftJoin('users AS u','u.id','=','cr.user_id')
-            ->selectRaw("
-                cr.id, cr.user_id,
-                COALESCE(u.name,'Рыбак') AS user_name,
-                '' AS user_avatar,
-                cr.lat, cr.lng, cr.species, cr.length, cr.weight,
-                cr.style, cr.lure, cr.tackle, cr.notes, cr.photo_url,
-                COALESCE(cr.caught_at, cr.created_at) AS created_at,
-                (SELECT COUNT(*) FROM catch_likes cl WHERE cl.catch_id=cr.id) AS likes_count,
-                (SELECT COUNT(*) FROM catch_comments cc WHERE cc.catch_id=cr.id) AS comments_count
-            ")
-            ->where('cr.privacy','all');
+        $sql = "SELECT cr.id, cr.user_id, u.name as user_name, COALESCE(u.photo_url,'') as user_avatar,
+                       cr.lat, cr.lng, cr.species, cr.length, cr.weight, cr.style as method, cr.lure as bait, cr.tackle as gear,
+                       cr.notes as caption, cr.photo_url as media_url, cr.created_at,
+                       (SELECT COUNT(*) FROM catch_likes cl WHERE cl.catch_id=cr.id) AS likes_count,
+                       (SELECT COUNT(*) FROM catch_comments cc WHERE cc.catch_id=cr.id AND (cc.is_approved=1 OR cc.is_approved IS NULL)) AS comments_count,
+                       0 AS liked_by_me
+                FROM catch_records cr
+                LEFT JOIN users u ON u.id=cr.user_id
+                WHERE cr.privacy IN ('all','friends')
+                ORDER BY cr.created_at DESC
+                LIMIT ? OFFSET ?";
+        $items = DB::select($sql, [$limit, $offset]);
 
-        if($species) $q->where('cr.species','like','%'.$species.'%');
-        if($userId)  $q->where('cr.user_id',(int)$userId);
-
-        if($placeId){
-            $p = DB::table('fishing_points')->where('id',(int)$placeId)->first();
-            if($p){
-                $lat0=$p->lat; $lng0=$p->lng; $km=2.0;
-                $q->whereRaw(
-                  "(6371*ACOS( COS(RADIANS(?))*COS(RADIANS(cr.lat))*COS(RADIANS(cr.lng)-RADIANS(?)) + SIN(RADIANS(?))*SIN(RADIANS(cr.lat)) )) <= ?",
-                  [$lat0,$lng0,$lat0,$km]
-                );
-            }
-        }
-
-        $items = $q->orderByDesc('created_at')->orderByDesc('cr.id')
-                   ->limit($limit)->offset($offset)->get();
-
-        return response()->json([
-            'items'=>$items,
-            'next_offset'=>$offset + $items->count()
-        ]);
+        return response()->json(['items' => $items, 'limit' => $limit, 'offset' => $offset]);
     }
 }
