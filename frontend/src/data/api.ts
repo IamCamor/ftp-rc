@@ -57,3 +57,18 @@ export async function checkHandleAvailability(handle:string){ const API_BASE=(im
 export async function completeProfile(payload: FormData){ const API_BASE=(import.meta as any).env?.VITE_API_BASE?.toString().trim()||""; const r=await fetch(`${API_BASE}/api/v1/profile/setup`,{ method:"POST", body: payload }); if(!r.ok) throw new Error("Не удалось сохранить профиль"); return r.json(); }
 
 export async function uploadAvatar(file: File){ const API_BASE=(import.meta as any).env?.VITE_API_BASE?.toString().trim()||""; const fd=new FormData(); fd.append("avatar", file); const r=await fetch(`${API_BASE}/api/v1/profile/avatar`,{ method:"POST", body: fd }); if(!r.ok) throw new Error("Не удалось загрузить аватар"); return r.json(); }
+
+// added by script: notifications & me helpers
+export async function notifications(){
+  const BASE = (import.meta as any).env?.VITE_API_BASE || "https://api.fishtrackpro.ru/api/v1";
+  const r = await fetch(`${BASE}/notifications`, { credentials: "include" });
+  if(!r.ok) throw new Error(String(r.status));
+  const j = await r.json();
+  return Array.isArray((j as any).items) ? (j as any).items : [];
+}
+export async function profileMe(){
+  const BASE = (import.meta as any).env?.VITE_API_BASE || "https://api.fishtrackpro.ru/api/v1";
+  const r = await fetch(`${BASE}/profile/me`, { credentials: "include" });
+  if(!r.ok) throw new Error(String(r.status));
+  return (await r.json()) as any;
+}

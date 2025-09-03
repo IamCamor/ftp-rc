@@ -1,0 +1,16 @@
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,GRAD,FILL@20..48,100..700,-50..200,0..1');
+
+.material-symbols-rounded {
+  font-family: 'Material Symbols Rounded';
+  font-weight: normal; font-style: normal; font-size: 24px;
+  line-height: 1; letter-spacing: normal; text-transform: none;
+  display: inline-block; white-space: nowrap; word-wrap: normal;
+  direction: ltr;
+  -webkit-font-feature-settings: 'liga'; -webkit-font-smoothing: antialiased;
+}
+
+.z-header { z-index: 40; }
+.z-fab { z-index: 35; }
+.z-bottomnav { z-index: 30; }
+.z-map-popover { z-index: 28; }
+.z-map { z-index: 10; }

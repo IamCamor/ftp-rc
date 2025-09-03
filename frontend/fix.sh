@@ -1,486 +1,421 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "==> FishTrackPro frontend patch pack"
-[ -d src ] || mkdir -p src
-mkdir -p src/ui/{components,screens,data,config}
-touch index.html
+# Работает из корня фронта
+ROOT="$(pwd)"
+SRC="$ROOT/src"
 
-# package.json (React 18, MUI, Leaflet, Router, RHF, Zod)
-cat > package.json <<'JSON'
-{
-  "name": "fishtrackpro-frontend",
-  "private": true,
-  "version": "0.8.0",
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview --port 5174"
-  },
-  "dependencies": {
-    "@emotion/react": "^11.13.3",
-    "@emotion/styled": "^11.13.0",
-    "@hookform/resolvers": "^3.9.0",
-    "@mui/icons-material": "^6.1.7",
-    "@mui/material": "^6.1.7",
-    "axios": "^1.7.9",
-    "leaflet": "^1.9.4",
-    "react": "18.2.0",
-    "react-dom": "18.2.0",
-    "react-hook-form": "^7.53.0",
-    "react-leaflet": "^4.2.1",
-    "react-router-dom": "^6.26.2",
-    "zod": "^3.23.8"
-  },
-  "devDependencies": {
-    "@types/leaflet": "^1.9.12",
-    "@types/node": "^20.14.15",
-    "@types/react": "^18.3.11",
-    "@types/react-dom": "^18.3.0",
-    "@vitejs/plugin-react": "^4.3.3",
-    "typescript": "^5.5.4",
-    "vite": "^5.4.3"
-  }
+mkdir -p "$SRC/screens" "$SRC/components" "$SRC/config" "$SRC/data" "$SRC/styles"
+
+# ---------- 1) Универсальная иконка (если ещё нет) ----------
+if [ ! -f "$SRC/components/Icon.tsx" ]; then
+  cat > "$SRC/components/Icon.tsx" <<'TSX'
+import React from "react";
+import { ICONS } from "../config/ui";
+
+type Props = {
+  name: keyof typeof ICONS | string;
+  className?: string;
+  size?: number;
+  weight?: number;
+  grade?: number;
+  fill?: 0|1;
+  title?: string;
+};
+
+export default function Icon({ name, className="", size=24, weight=400, grade=0, fill=0, title }: Props){
+  const glyph = (ICONS as any)[name] ?? name; // можно передать сырое имя
+  return (
+    <span
+      className={`material-symbols-rounded ${className}`}
+      style={{ fontSize: size, fontVariationSettings: `'FILL' ${fill}, 'wght' ${weight}, 'GRAD' ${grade}, 'opsz' ${Math.max(20, size)}` }}
+      aria-label={title || (typeof name === "string" ? name : "")}
+      title={title}
+    >
+      {glyph}
+    </span>
+  );
 }
-JSON
+TSX
+fi
 
-# tsconfig.json
-cat > tsconfig.json <<'JSON'
-{
-  "compilerOptions": {
-    "target": "ES2020",
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
-    "module": "ESNext",
-    "jsx": "react-jsx",
-    "moduleResolution": "Bundler",
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "noEmit": true,
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "types": ["vite/client", "leaflet"]
-  },
-  "include": ["src"]
-}
-JSON
+# ---------- 2) Конфиг UI с иконками/логотипом (добавляем или обновляем) ----------
+cat > "$SRC/config/ui.ts" <<'TS'
+export const ASSETS = {
+  logo: "/assets/logo.svg",
+  defaultAvatar: "/assets/default-avatar.png",
+  bgPattern: "/assets/bg-pattern.png",
+};
 
-# vite.config.ts
-cat > vite.config.ts <<'TS'
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
-export default defineConfig({ plugins:[react()], server:{port:5173,host:true} });
+export const ICONS = {
+  map: "map",
+  feed: "dynamic_feed",
+  alerts: "notifications",
+  profile: "account_circle",
+  plus: "add",
+  like: "favorite",
+  comment: "mode_comment",
+  share: "ios_share",
+  back: "arrow_back",
+  settings: "settings",
+  friends: "group",
+  rating: "military_tech",
+  weather: "sunny",
+  location: "location_on",
+  edit: "edit",
+  logout: "logout",
+  check: "check",
+  photo: "photo_camera",
+  video: "videocam",
+  place: "bookmark_added",
+} as const;
 TS
 
-# index.html
-cat > index.html <<'HTML'
-<!doctype html>
-<html lang="ru">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>FishTrackPro</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
-</html>
-HTML
+# ---------- 3) Стили для Material Symbols + слои ----------
+cat > "$SRC/styles/ui.css" <<'CSS'
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,GRAD,FILL@20..48,100..700,-50..200,0..1');
 
-# index.css
-mkdir -p src/ui
-cat > src/index.css <<'CSS'
-:root { --bg:#0f1216; --glass:rgba(255,255,255,.08); }
-html, body, #root { height:100%; }
-body { margin:0; font-family: Inter, system-ui, Arial, sans-serif; background:var(--bg); }
-.glass { background:var(--glass); backdrop-filter: blur(12px) saturate(1.2); border:1px solid rgba(255,255,255,.08); border-radius:16px; }
-.leaflet-container { width:100%; height:100%; border-radius:16px; }
+.material-symbols-rounded {
+  font-family: 'Material Symbols Rounded';
+  font-weight: normal; font-style: normal; font-size: 24px;
+  line-height: 1; letter-spacing: normal; text-transform: none;
+  display: inline-block; white-space: nowrap; word-wrap: normal;
+  direction: ltr;
+  -webkit-font-feature-settings: 'liga'; -webkit-font-smoothing: antialiased;
+}
+
+.z-header { z-index: 40; }
+.z-fab { z-index: 35; }
+.z-bottomnav { z-index: 30; }
+.z-map-popover { z-index: 28; }
+.z-map { z-index: 10; }
 CSS
 
-# main.tsx
-cat > src/main.tsx <<'TSX'
-import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
-import { BrowserRouter } from "react-router-dom";
-import App from "./ui/App";
-import "./index.css";
+# ---------- 4) Страница уведомлений ----------
+cat > "$SRC/screens/NotificationsPage.tsx" <<'TSX'
+import React, { useEffect, useState } from "react";
+import Icon from "../components/Icon";
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
-  </StrictMode>
-);
-TSX
-
-# ui/config/ui.ts
-mkdir -p src/ui/config
-cat > src/ui/config/ui.ts <<'TS'
-export const uiConfig = {
-  logo: "/logo.svg",
-  backgroundPattern: "/bg.svg",
-  brand: { primary: "#57B0E6", secondary: "#1DE9B6" },
-  glass: { opacity: 0.08, intensity: 12 }
+type Noti = {
+  id: number;
+  type: string; // "like" | "comment" | "follow" | "system"
+  title: string;
+  body?: string;
+  created_at: string;
+  is_read?: boolean;
+  link?: string;
 };
-TS
 
-# ui/data/api.ts
-mkdir -p src/ui/data
-cat > src/ui/data/api.ts <<'TS'
-import axios from "axios";
-const API_BASE = import.meta.env.VITE_API_BASE || "/api";
-export const api = axios.create({ baseURL: `${API_BASE}/v1`, timeout: 10000 });
-
-export type CatchItem = { id:number; lat:number; lng:number; fish:string; weight?:number; length?:number; user?:{id:number;name:string}; created_at?:string; };
-export type MapPoint = { id:number; lat:number; lng:number; title:string; type:"shop"|"slip"|"camp"|"catch"|"spot"; is_highlighted?:boolean; };
-
-export async function fetchFeed(tab:"global"|"local"|"follow", coords?:{lat:number;lng:number}){
-  const url = tab==="global" ? "/feed/global" : tab==="follow" ? "/feed/follow" : "/feed/local";
-  const params = tab==="local" ? coords : undefined;
-  const { data } = await api.get(url, { params }); return data.items ?? data;
+async function fetchNotifications(): Promise<Noti[]> {
+  try {
+    const base = (import.meta as any).env?.VITE_API_BASE || "https://api.fishtrackpro.ru/api/v1";
+    const r = await fetch(`${base}/notifications`, { credentials: "include" });
+    if (!r.ok) return [];
+    const j = await r.json();
+    return Array.isArray(j.items) ? j.items : [];
+  } catch {
+    return [];
+  }
 }
-export async function fetchMapPoints(params:{bbox?:string;filter?:string}){
-  const { data } = await api.get("/map/points", { params }); return data.items ?? data;
-}
-export async function createCatch(payload:any){ return (await api.post("/catches", payload)).data; }
-export async function createEvent(payload:any){ return (await api.post("/events", payload)).data; }
-export async function createPoint(payload:any){ return (await api.post("/map/points", payload)).data; }
-export async function health(){ return (await api.get("/health")).data; }
-TS
 
-# components/BottomNav.tsx
-mkdir -p src/ui/components
-cat > src/ui/components/BottomNav.tsx <<'TSX'
-import { BottomNavigation, BottomNavigationAction, Paper } from "@mui/material";
-import MapIcon from "@mui/icons-material/Map";
-import DynamicFeedIcon from "@mui/icons-material/DynamicFeed";
-import AddLocationAltIcon from "@mui/icons-material/AddLocationAlt";
-import EventIcon from "@mui/icons-material/Event";
-import AddCircleIcon from "@mui/icons-material/AddCircle";
-import { useLocation, useNavigate } from "react-router-dom";
-import { useEffect, useState } from "react";
+export default function NotificationsPage(){
+  const [items, setItems] = useState<Noti[]>([]);
+  const [loading, setLoading] = useState(true);
 
-export default function BottomNav(){
-  const nav = useNavigate(); const loc = useLocation(); const [value,setValue]=useState(0);
-  useEffect(()=>{ if(loc.pathname.startsWith("/map")) setValue(0);
-    else if(loc.pathname.startsWith("/feed")) setValue(1);
-    else if(loc.pathname.startsWith("/add/point")) setValue(2);
-    else if(loc.pathname.startsWith("/events")) setValue(3);
-    else setValue(-1); },[loc.pathname]);
+  useEffect(()=> {
+    fetchNotifications().then((list)=> {
+      setItems(list);
+      setLoading(false);
+    });
+  },[]);
+
+  if (loading) return <div className="p-4 text-gray-500">Загрузка…</div>;
+  if (!items.length) return <div className="p-4 text-gray-500">Уведомлений пока нет</div>;
+
+  const iconByType: Record<string,string> = {
+    like: "like",
+    comment: "comment",
+    follow: "friends",
+    system: "notifications",
+  };
+
   return (
-    <Paper sx={{position:"fixed",bottom:12,left:12,right:12,borderRadius:4}} elevation={6} className="glass">
-      <BottomNavigation value={value} onChange={(_,v)=>setValue(v)} showLabels>
-        <BottomNavigationAction label="Карта" icon={<MapIcon/>} onClick={()=>nav("/map")}/>
-        <BottomNavigationAction label="Лента" icon={<DynamicFeedIcon/>} onClick={()=>nav("/feed")}/>
-        <BottomNavigationAction label="Точка" icon={<AddLocationAltIcon/>} onClick={()=>nav("/add/point")}/>
-        <BottomNavigationAction label="События" icon={<EventIcon/>} onClick={()=>nav("/events")}/>
-        <BottomNavigationAction label="Улов" icon={<AddCircleIcon/>} onClick={()=>nav("/add/catch")}/>
-      </BottomNavigation>
-    </Paper>
-  );
-}
-TSX
+    <div className="pb-24">
+      <div className="sticky top-0 z-header backdrop-blur bg-white/60 border-b border-white/30 p-3 flex items-center gap-2">
+        <Icon name="alerts" />
+        <div className="font-semibold">Уведомления</div>
+      </div>
 
-# components/MapView.tsx
-cat > src/ui/components/MapView.tsx <<'TSX'
-import { useEffect, useMemo, useState } from "react";
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
-import { fetchMapPoints, MapPoint } from "../data/api";
-
-const icon = L.icon({
-  iconUrl:"https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-  iconRetinaUrl:"https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-  shadowUrl:"https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-  iconSize:[25,41], iconAnchor:[12,41]
-});
-
-const DEMO:MapPoint[] = [
-  { id:1, lat:55.751244, lng:37.618423, title:"Спот: Москва-река", type:"spot", is_highlighted:true },
-  { id:2, lat:59.93863, lng:30.31413, title:"Магазин снастей", type:"shop" },
-  { id:3, lat:60.003, lng:30.2, title:"Слип", type:"slip" }
-];
-
-export default function MapView(){
-  const [points,setPoints] = useState<MapPoint[]>(DEMO);
-  useEffect(()=>{ let m=true;
-    fetchMapPoints({}).then(it=>{ if(m && Array.isArray(it) && it.length) setPoints(it); })
-    .catch(()=>{}); return ()=>{ m=false; }; },[]);
-  const center = useMemo(()=>[55.76,37.64] as [number,number],[]);
-  return (
-    <div style={{height:"calc(100vh - 140px)"}}>
-      <MapContainer center={center} zoom={6} scrollWheelZoom className="glass">
-        <TileLayer attribution='&copy; OSM' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"/>
-        {points.map(p=>(
-          <Marker key={p.id} position={[p.lat,p.lng]} icon={icon}>
-            <Popup><b>{p.title}</b><br/>Тип: {p.type}{p.is_highlighted?" ⭐":""}</Popup>
-          </Marker>
+      <ul className="divide-y divide-gray-100">
+        {items.map(n => (
+          <li key={n.id} className="p-3 flex gap-3 items-start">
+            <Icon name={iconByType[n.type] || "notifications"} className={`${n.is_read ? "text-gray-400" : "text-blue-600"}`} />
+            <div className="flex-1">
+              <div className="font-medium">{n.title}</div>
+              {n.body && <div className="text-gray-600 text-sm">{n.body}</div>}
+              <div className="text-xs text-gray-400 mt-1">{new Date(n.created_at).toLocaleString()}</div>
+            </div>
+            {n.link && (
+              <a href={n.link} className="text-sm text-blue-600 hover:underline">Открыть</a>
+            )}
+          </li>
         ))}
-      </MapContainer>
+      </ul>
     </div>
   );
 }
 TSX
 
-# screens (Feed, AddCatch, AddPoint, Events, + небольшие заглушки)
-cat > src/ui/screens/FeedScreen.tsx <<'TSX'
-import { useEffect, useState } from "react";
-import { fetchFeed, CatchItem } from "../data/api";
-import { Box, Chip, Grid2 as Grid, Stack, Typography, Card, CardContent, Avatar } from "@mui/material";
+# ---------- 5) Страница профиля ----------
+cat > "$SRC/screens/ProfilePage.tsx" <<'TSX'
+import React, { useEffect, useState } from "react";
+import Icon from "../components/Icon";
+import { ASSETS } from "../config/ui";
 
-type Tab = "global" | "local" | "follow";
-export default function FeedScreen(){
-  const [tab,setTab] = useState<Tab>("global");
-  const [items,setItems] = useState<CatchItem[]>([]);
-  const [loading,setLoading] = useState(false);
+type Profile = {
+  id: number;
+  name: string;
+  handle?: string;
+  avatar?: string;
+  bonus?: number;
+  catches_count?: number;
+  friends_count?: number;
+  followers_count?: number;
+};
 
-  useEffect(()=>{ setLoading(true);
-    const coords = tab==="local" ? { lat:55.76, lng:37.64 } : undefined;
-    fetchFeed(tab,coords).then(setItems).catch(()=>setItems([
-      { id:101, lat:55.7, lng:37.6, fish:"Щука", weight:3.2, user:{id:1,name:"Demo"}, created_at:new Date().toISOString() },
-      { id:102, lat:59.9, lng:30.3, fish:"Окунь", weight:0.7, user:{id:2,name:"Test"} }
-    ])).finally(()=>setLoading(false)); },[tab]);
-
-  return (
-    <Stack spacing={2}>
-      <Typography variant="h5" color="white">Лента</Typography>
-      <Stack direction="row" spacing={1}>
-        <Chip label="Global" color={tab==="global"?"primary":"default"} onClick={()=>setTab("global")} />
-        <Chip label="Local"  color={tab==="local" ?"primary":"default"} onClick={()=>setTab("local")} />
-        <Chip label="Follow" color={tab==="follow"?"primary":"default"} onClick={()=>setTab("follow")} />
-      </Stack>
-      <Grid container spacing={2}>
-        {items.map(it=>(
-          <Grid size={{xs:12,md:6}} key={it.id}>
-            <Card className="glass"><CardContent>
-              <Stack direction="row" spacing={2} alignItems="center">
-                <Avatar>{(it.user?.name ?? "U").slice(0,1)}</Avatar>
-                <Stack>
-                  <Typography color="white">{it.user?.name ?? "Аноним"}</Typography>
-                  <Typography variant="body2" color="#9aa4af">{new Date(it.created_at ?? Date.now()).toLocaleString()}</Typography>
-                </Stack>
-              </Stack>
-              <Typography mt={2} color="white">
-                Улов: {it.fish} {it.weight?`• ${it.weight} кг`: ""} {it.length?`• ${it.length} см`:""}
-              </Typography>
-            </CardContent></Card>
-          </Grid>
-        ))}
-      </Grid>
-      {loading && <Typography color="#9aa4af">Загрузка…</Typography>}
-    </Stack>
-  );
+async function fetchMe(): Promise<Profile | null> {
+  try {
+    const base = (import.meta as any).env?.VITE_API_BASE || "https://api.fishtrackpro.ru/api/v1";
+    const r = await fetch(`${base}/profile/me`, { credentials: "include" });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return j?.data || j || null;
+  } catch {
+    return null;
+  }
 }
-TSX
 
-cat > src/ui/screens/AddCatchScreen.tsx <<'TSX'
-import { useForm } from "react-hook-form";
-import { z } from "zod";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { Button, Grid2 as Grid, MenuItem, Stack, TextField, Typography } from "@mui/material";
-import { createCatch } from "../data/api";
-import { useState } from "react";
+export default function ProfilePage(){
+  const [me, setMe] = useState<Profile | null>(null);
+  const [loading, setLoading] = useState(true);
 
-const schema = z.object({
-  lat: z.coerce.number(),
-  lng: z.coerce.number(),
-  fish: z.string().min(2),
-  weight: z.coerce.number().optional(),
-  length: z.coerce.number().optional(),
-  style: z.enum(["shore","boat","ice"]).default("shore"),
-  privacy: z.enum(["all","friends","groups","none"]).default("all")
-});
-type Form = z.infer<typeof schema>;
+  useEffect(()=> {
+    fetchMe().then((p)=> { setMe(p); setLoading(false); });
+  },[]);
 
-export default function AddCatchScreen(){
-  const [ok,setOk] = useState<string|null>(null);
-  const { register, handleSubmit, formState:{errors}, reset } = useForm<Form>({
-    resolver: zodResolver(schema),
-    defaultValues: { lat:55.76, lng:37.64, style:"shore", privacy:"all" }
-  });
-
-  const onSubmit = async (v:Form)=>{
-    setOk(null);
-    try{ await createCatch(v); setOk("Сохранено!"); reset(); }
-    catch{ setOk("DEMO: локально сохранено (без API)."); }
-  };
+  const avatar = me?.avatar || ASSETS.defaultAvatar;
 
   return (
-    <Stack spacing={2}>
-      <Typography variant="h5" color="white">Добавить улов</Typography>
-      <form onSubmit={handleSubmit(onSubmit)}>
-        <Grid container spacing={2}>
-          <Grid size={6}><TextField label="Широта" fullWidth {...register("lat")} error={!!errors.lat}/></Grid>
-          <Grid size={6}><TextField label="Долгота" fullWidth {...register("lng")} error={!!errors.lng}/></Grid>
-          <Grid size={12}><TextField label="Вид рыбы" fullWidth {...register("fish")} error={!!errors.fish}/></Grid>
-          <Grid size={6}><TextField label="Вес (кг)" fullWidth type="number" {...register("weight")}/></Grid>
-          <Grid size={6}><TextField label="Длина (см)" fullWidth type="number" {...register("length")}/></Grid>
-          <Grid size={6}>
-            <TextField select label="Вид ловли" fullWidth defaultValue="shore" {...register("style")}>
-              <MenuItem value="shore">Берег</MenuItem><MenuItem value="boat">Лодка</MenuItem><MenuItem value="ice">Лёд</MenuItem>
-            </TextField>
-          </Grid>
-          <Grid size={6}>
-            <TextField select label="Приватность" fullWidth defaultValue="all" {...register("privacy")}>
-              <MenuItem value="all">Все авторизованные</MenuItem>
-              <MenuItem value="friends">Только друзья</MenuItem>
-              <MenuItem value="groups">Группы</MenuItem>
-              <MenuItem value="none">Никому</MenuItem>
-            </TextField>
-          </Grid>
-          <Grid size={12}><Button variant="contained" type="submit">Сохранить</Button></Grid>
-        </Grid>
-      </form>
-      {ok && <Typography color="#1DE9B6">{ok}</Typography>}
-    </Stack>
-  );
-}
-TSX
+    <div className="pb-24">
+      <div className="sticky top-0 z-header backdrop-blur bg-white/60 border-b border-white/30 p-3 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <img src={ASSETS.logo} alt="logo" className="w-6 h-6" />
+          <div className="font-semibold">Профиль</div>
+        </div>
+        <a href="#/weather" className="flex items-center gap-1 text-sm">
+          <Icon name="weather" /> Погода
+        </a>
+      </div>
 
-cat > src/ui/screens/AddPointScreen.tsx <<'TSX'
-import { Button, Grid2 as Grid, MenuItem, Stack, TextField, Typography } from "@mui/material";
-import { useForm } from "react-hook-form";
-import { createPoint } from "../data/api";
+      {loading ? (
+        <div className="p-4 text-gray-500">Загрузка…</div>
+      ) : me ? (
+        <>
+          <div className="p-4 flex items-center gap-3">
+            <img src={avatar} alt="" className="w-16 h-16 rounded-full object-cover border border-white/40 shadow" />
+            <div className="flex-1">
+              <div className="font-semibold text-lg">{me.name}</div>
+              <div className="text-gray-500 text-sm">@{me.handle || "user" + me.id}</div>
+              <div className="mt-1 text-sm">
+                <span className="inline-flex items-center gap-1 mr-3"><Icon name="rating" /> {me.bonus ?? 0}</span>
+                <span className="inline-flex items-center gap-1 mr-3"><Icon name="place" /> {me.catches_count ?? 0}</span>
+                <span className="inline-flex items-center gap-1"><Icon name="friends" /> {me.friends_count ?? 0}</span>
+              </div>
+            </div>
+            <a href="#/settings" className="btn text-sm inline-flex items-center gap-1"><Icon name="settings" /> Настройки</a>
+          </div>
 
-type Form = { lat:number; lng:number; title:string; type:"shop"|"slip"|"camp"|"spot" };
-
-export default function AddPointScreen(){
-  const { register, handleSubmit, reset } = useForm<Form>({ defaultValues:{ lat:55.76, lng:37.64, type:"spot" } });
-  const onSubmit = async (v:Form) => {
-    try{ await createPoint(v); alert("Сохранено!"); reset(); }
-    catch{ alert("DEMO: точка сохранена локально (без API)"); }
-  };
-  return (
-    <Stack spacing={2}>
-      <Typography variant="h5" color="white">Добавить точку</Typography>
-      <form onSubmit={handleSubmit(onSubmit)}>
-        <Grid container spacing={2}>
-          <Grid size={6}><TextField label="Широта" fullWidth {...register("lat",{valueAsNumber:true})}/></Grid>
-          <Grid size={6}><TextField label="Долгота" fullWidth {...register("lng",{valueAsNumber:true})}/></Grid>
-          <Grid size={12}><TextField label="Название" fullWidth {...register("title")}/></Grid>
-          <Grid size={12}>
-            <TextField select label="Тип" fullWidth defaultValue="spot" {...register("type")}>
-              <MenuItem value="spot">Спот</MenuItem><MenuItem value="shop">Магазин</MenuItem><MenuItem value="slip">Слип</MenuItem><MenuItem value="camp">Турбаза</MenuItem>
-            </TextField>
-          </Grid>
-          <Grid size={12}><Button variant="contained" type="submit">Сохранить</Button></Grid>
-        </Grid>
-      </form>
-    </Stack>
-  );
-}
-TSX
-
-cat > src/ui/screens/EventsScreen.tsx <<'TSX'
-import { Button, Card, CardContent, Grid2 as Grid, Stack, TextField, Typography } from "@mui/material";
-import { useState } from "react";
-import { createEvent } from "../data/api";
-type EventItem = { id:number; title:string; region?:string; starts_at?:string; description?:string };
-
-export default function EventsScreen(){
-  const [items,setItems] = useState<EventItem[]>([{ id:1, title:"Кубок по спиннингу", region:"RU-MOW", starts_at:new Date().toISOString(), description:"Демо" }]);
-  const [creating,setCreating] = useState(false);
-  const [form,setForm] = useState({ title:"", region:"", starts_at:"" });
-
-  const submit = async ()=>{ try{ const res = await createEvent(form as any); setItems([res,...items]); }
-    catch{ setItems([{ id: items.length+1, ...form } as any, ...items]); }
-    setCreating(false); };
-
-  return (
-    <Stack spacing={2}>
-      <Stack direction="row" justifyContent="space-between" alignItems="center">
-        <Typography variant="h5" color="white">События</Typography>
-        <Button variant="contained" onClick={()=>setCreating(true)}>Добавить</Button>
-      </Stack>
-      {creating && (
-        <Card className="glass"><CardContent>
-          <Stack spacing={2}>
-            <TextField label="Название" value={form.title} onChange={e=>setForm({...form,title:e.target.value})}/>
-            <TextField label="Регион" value={form.region} onChange={e=>setForm({...form,region:e.target.value})}/>
-            <TextField label="Дата" type="datetime-local" value={form.starts_at} onChange={e=>setForm({...form,starts_at:e.target.value})}/>
-            <Button variant="contained" onClick={submit}>Сохранить</Button>
-          </Stack>
-        </CardContent></Card>
+          <div className="px-4 grid grid-cols-2 gap-3">
+            <a href="#/my-catches" className="p-3 rounded-2xl bg-white/60 backdrop-blur border border-white/50 shadow-sm flex items-center gap-2">
+              <Icon name="photo" /> Мои уловы
+            </a>
+            <a href="#/friends" className="p-3 rounded-2xl bg-white/60 backdrop-blur border border-white/50 shadow-sm flex items-center gap-2">
+              <Icon name="friends" /> Друзья
+            </a>
+            <a href="#/ratings" className="p-3 rounded-2xl bg-white/60 backdrop-blur border border-white/50 shadow-sm flex items-center gap-2">
+              <Icon name="rating" /> Рейтинги
+            </a>
+            <a href="#/logout" className="p-3 rounded-2xl bg-white/60 backdrop-blur border border-white/50 shadow-sm flex items-center gap-2">
+              <Icon name="logout" /> Выйти
+            </a>
+          </div>
+        </>
+      ) : (
+        <div className="p-4">
+          <div className="rounded-2xl p-4 bg-white/60 backdrop-blur border border-white/50">
+            <div className="font-semibold mb-1">Требуется вход</div>
+            <div className="text-sm text-gray-600 mb-3">Войдите, чтобы видеть профиль и бонусы.</div>
+            <a href="#/auth" className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-black text-white">
+              <Icon name="login" /> Войти
+            </a>
+          </div>
+        </div>
       )}
-      <Grid container spacing={2}>
-        {items.map(ev=>(
-          <Grid size={{xs:12,md:6}} key={ev.id}>
-            <Card className="glass"><CardContent>
-              <Typography color="white" fontWeight={600}>{ev.title}</Typography>
-              <Typography color="#9aa4af">{ev.region}</Typography>
-              <Typography color="#9aa4af">{ev.starts_at && new Date(ev.starts_at).toLocaleString()}</Typography>
-              <Typography color="white">{ev.description}</Typography>
-            </CardContent></Card>
-          </Grid>
-        ))}
-      </Grid>
-    </Stack>
+    </div>
   );
 }
 TSX
 
-# App.tsx
-cat > src/ui/App.tsx <<'TSX'
-import { Container, CssBaseline, ThemeProvider, createTheme } from "@mui/material";
-import { Routes, Route, NavLink } from "react-router-dom";
-import MapView from "./components/MapView";
+# ---------- 6) Обновляем/создаём BottomNav с вкладкой уведомлений ----------
+cat > "$SRC/components/BottomNav.tsx" <<'TSX'
+import React from "react";
+import Icon from "./Icon";
+
+type Tab = "map"|"feed"|"alerts"|"profile";
+
+export default function BottomNav({ active, onChange, onFab }:{
+  active: Tab;
+  onChange: (t:Tab)=>void;
+  onFab?: ()=>void;
+}){
+  const Item = ({id, label, icon}:{id:Tab; label:string; icon:string}) => (
+    <button
+      className={`flex flex-col items-center flex-1 py-2 ${active===id ? "text-black" : "text-gray-500"}`}
+      onClick={()=>onChange(id)}
+    >
+      <Icon name={icon} />
+      <span className="text-[11px] mt-0.5">{label}</span>
+    </button>
+  );
+  return (
+    <div className="z-bottomnav fixed bottom-0 left-0 right-0">
+      <div className="mx-auto max-w-md relative">
+        <div className="absolute left-0 right-0 bottom-8 flex justify-center pointer-events-none">
+          <button
+            className="pointer-events-auto rounded-full w-14 h-14 flex items-center justify-center shadow-lg bg-black text-white"
+            onClick={onFab}
+            aria-label="Добавить"
+          >
+            <Icon name="plus" />
+          </button>
+        </div>
+        <div className="rounded-t-2xl backdrop-blur bg-white/70 border-t border-white/50 shadow flex">
+          <Item id="map" label="Карта" icon="map" />
+          <Item id="feed" label="Лента" icon="feed" />
+          <div className="w-14" /> {/* место под FAB */}
+          <Item id="alerts" label="Оповещения" icon="alerts" />
+          <Item id="profile" label="Профиль" icon="profile" />
+        </div>
+      </div>
+    </div>
+  );
+}
+TSX
+
+# ---------- 7) Подключаем страницы в App.tsx (хэш-навигация) ----------
+cat > "$SRC/App.tsx" <<'TSX'
+import React, { useEffect, useMemo, useState } from "react";
+import MapScreen from "./screens/MapScreen";
 import FeedScreen from "./screens/FeedScreen";
-import AddCatchScreen from "./screens/AddCatchScreen";
-import AddPointScreen from "./screens/AddPointScreen";
-import EventsScreen from "./screens/EventsScreen";
+import NotificationsPage from "./screens/NotificationsPage";
+import ProfilePage from "./screens/ProfilePage";
 import BottomNav from "./components/BottomNav";
 
-const theme = createTheme({
-  palette:{ mode:"dark", primary:{ main:"#57B0E6" }, secondary:{ main:"#1DE9B6" } },
-  shape:{ borderRadius:16 }
-});
+type Tab = "map"|"feed"|"alerts"|"profile";
 
-function TopBar(){
-  const linkSx = { color:"#fff", textDecoration:"none", marginRight:16 };
-  return (
-    <div style={{position:"sticky",top:0,zIndex:10,padding:"12px 16px"}} className="glass">
-      <NavLink to="/map" style={linkSx as any}>Карта</NavLink>
-      <NavLink to="/feed" style={linkSx as any}>Лента</NavLink>
-      <NavLink to="/events" style={linkSx as any}>События</NavLink>
-    </div>
-  );
+function routeToTab(hash: string): Tab {
+  const key = hash.replace(/^#\//,'').split(/[?#]/)[0];
+  if (key === "feed") return "feed";
+  if (key === "alerts") return "alerts";
+  if (key === "profile") return "profile";
+  return "map";
 }
 
 export default function App(){
+  const [tab, setTab] = useState<Tab>(routeToTab(location.hash || "#/map"));
+  useEffect(()=> {
+    const onHash = () => setTab(routeToTab(location.hash || "#/map"));
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  },[]);
+
+  useEffect(()=> {
+    const target = tab === "map" ? "#/map" : tab === "feed" ? "#/feed" : tab === "alerts" ? "#/alerts" : "#/profile";
+    if (location.hash !== target) location.hash = target;
+  }, [tab]);
+
+  const onFab = () => {
+    if (tab === "map") location.hash = "#/add-place";
+    else if (tab === "feed") location.hash = "#/add-catch";
+    else alert("Скоро тут появится действие");
+  };
+
   return (
-    <ThemeProvider theme={theme}>
-      <CssBaseline/>
-      <TopBar/>
-      <Container sx={{ py:2, pb:12 }}>
-        <Routes>
-          <Route path="/" element={<MapView/>}/>
-          <Route path="/map" element={<MapView/>}/>
-          <Route path="/feed" element={<FeedScreen/>}/>
-          <Route path="/events" element={<EventsScreen/>}/>
-          <Route path="/add/catch" element={<AddCatchScreen/>}/>
-          <Route path="/add/point" element={<AddPointScreen/>}/>
-        </Routes>
-      </Container>
-      <BottomNav/>
-    </ThemeProvider>
+    <div className="relative w-full h-screen bg-gray-50">
+      {tab==="map" && <MapScreen/>}
+      {tab==="feed" && <FeedScreen/>}
+      {tab==="alerts" && <NotificationsPage/>}
+      {tab==="profile" && <ProfilePage/>}
+
+      <BottomNav active={tab} onChange={setTab} onFab={onFab}/>
+    </div>
   );
 }
 TSX
 
-# .env
-cat > .env <<'ENV'
-VITE_API_BASE=/api
-ENV
+# ---------- 8) Безопасное расширение api.ts ----------
+# Если файла нет — создаём минимальный
+if [ ! -f "$SRC/data/api.ts" ]; then
+  cat > "$SRC/data/api.ts" <<'TS'
+const BASE = (import.meta as any).env?.VITE_API_BASE || "https://api.fishtrackpro.ru/api/v1";
 
-echo "==> Installing node deps…"
-rm -rf node_modules package-lock.json
-npm i
+async function http<T=any>(path: string, init?: RequestInit): Promise<T>{
+  const r = await fetch(`${BASE}${path}`, { credentials: "include", ...init });
+  if(!r.ok) throw new Error(String(r.status));
+  return r.json();
+}
 
-echo "==> Frontend patch applied. Run:"
-echo "   npm run dev"
+export const api = {
+  points: (q:string)=> http(`/map/points${q}`),
+  feed: (q:string)=> http(`/feed${q}`),
+  notifications: ()=> http(`/notifications`),
+  me: ()=> http(`/profile/me`),
+};
+export default api;
+TS
+else
+  # Аппендим недостающие функции, не трогая существующие
+  if ! grep -q "notifications" "$SRC/data/api.ts"; then
+    cat >> "$SRC/data/api.ts" <<'TS'
+
+// added by script: notifications & me helpers
+export async function notifications(){
+  const BASE = (import.meta as any).env?.VITE_API_BASE || "https://api.fishtrackpro.ru/api/v1";
+  const r = await fetch(`${BASE}/notifications`, { credentials: "include" });
+  if(!r.ok) throw new Error(String(r.status));
+  const j = await r.json();
+  return Array.isArray((j as any).items) ? (j as any).items : [];
+}
+export async function profileMe(){
+  const BASE = (import.meta as any).env?.VITE_API_BASE || "https://api.fishtrackpro.ru/api/v1";
+  const r = await fetch(`${BASE}/profile/me`, { credentials: "include" });
+  if(!r.ok) throw new Error(String(r.status));
+  return (await r.json()) as any;
+}
+TS
+  fi
+fi
+
+echo "✓ Уведомления и Профиль добавлены.
+- src/screens/NotificationsPage.tsx
+- src/screens/ProfilePage.tsx
+- src/components/BottomNav.tsx
+- src/components/Icon.tsx
+- src/config/ui.ts
+- src/styles/ui.css
+- src/App.tsx
+- src/data/api.ts (обновлён / дополнен)
+
+Не забудь подключить styles/ui.css (в main.tsx или index.css):
+  import './styles/ui.css';
+"
