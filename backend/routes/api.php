@@ -81,8 +81,17 @@ Route::get('/user/{id}/markers', [UserCatchesController::class, 'markers']);
     Route::get('/catches/{id}', [CatchesController::class, 'show']);
     // Route::post('/catches', [CatchesController::class, 'store']);        // если уже включали
 
-    // Загрузка медиа
-    Route::post('/upload', [UploadController::class, 'store']);
+    // Ratings
+Route::get('/rating', [\App\Http\Controllers\Api\RatingController::class, 'index']);
+
+// Friends
+Route::get('/friends', [\App\Http\Controllers\Api\FriendsController::class, 'index']);
+Route::get('/friends/suggest', [\App\Http\Controllers\Api\FriendsController::class, 'suggest']);
+
+// Comments (with AI moderation already in controller)
+Route::post('/catch/{id}/comments', [\App\Http\Controllers\Api\CommentController::class, 'store']); // replaces previous if existed
+
+
 });
 
 
