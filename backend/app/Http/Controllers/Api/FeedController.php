@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
@@ -9,22 +10,55 @@ class FeedController extends Controller
 {
     public function index(Request $r)
     {
-        $limit = (int) $r->query('limit', 20);
-        $offset = (int) $r->query('offset', 0);
+        $limit  = min(max((int)$r->query('limit', 20), 1), 50);
+        $offset = max((int)$r->query('offset', 0), 0);
+        $near   = $r->query('near'); // "lat,lng" (опционально)
 
-        $sql = "SELECT cr.id, cr.user_id, u.name as user_name, COALESCE(u.photo_url,'') as user_avatar,
-                       cr.lat, cr.lng, cr.species, cr.length, cr.weight, cr.style as method, cr.lure as bait, cr.tackle as gear,
-                       cr.notes as caption, cr.photo_url as media_url, cr.created_at,
-                       (SELECT COUNT(*) FROM catch_likes cl WHERE cl.catch_id=cr.id) AS likes_count,
-                       (SELECT COUNT(*) FROM catch_comments cc WHERE cc.catch_id=cr.id AND (cc.is_approved=1 OR cc.is_approved IS NULL)) AS comments_count,
-                       0 AS liked_by_me
-                FROM catch_records cr
-                LEFT JOIN users u ON u.id=cr.user_id
-                WHERE cr.privacy IN ('all','friends')
-                ORDER BY cr.created_at DESC
-                LIMIT ? OFFSET ?";
-        $items = DB::select($sql, [$limit, $offset]);
+        $q = DB::table('catch_records as cr')
+            ->leftJoin('users as u', 'u.id', '=', 'cr.user_id')
+            ->select([
+                'cr.id',
+                'cr.user_id',
+                DB::raw('u.name AS user_name'),
+                'cr.lat','cr.lng',
+                'cr.species',
+                DB::raw('cr.length AS size_cm'),
+                DB::raw('cr.weight AS weight_g'),
+                DB::raw('cr.style AS method'),
+                DB::raw('cr.tackle AS gear'),
+                DB::raw('cr.lure AS bait'),
+                DB::raw('cr.notes AS caption'),
+                DB::raw('cr.photo_url AS media_url'),
+                'cr.created_at',
+                DB::raw('(SELECT COUNT(*) FROM catch_likes cl WHERE cl.catch_id=cr.id) AS likes_count'),
+                DB::raw('(SELECT COUNT(*) FROM catch_comments cc WHERE cc.catch_id=cr.id AND (cc.is_approved=1 OR cc.is_approved IS NULL)) AS comments_count'),
+            ])
+            ->where('cr.privacy', 'public');
 
-        return response()->json(['items' => $items, 'limit' => $limit, 'offset' => $offset]);
+        if ($near && str_contains($near, ',')) {
+            [$lat,$lng] = array_map('floatval', explode(',', $near, 2));
+            // простая сортировка по «псевдо-дистанции»
+            $q->orderByRaw('(ABS(cr.lat - ?) + ABS(cr.lng - ?)) ASC', [$lat, $lng]);
+        } else {
+            $q->orderByDesc('cr.created_at');
+        }
+
+        $rows = $q->limit($limit)->offset($offset)->get();
+
+        $defaultAvatar = config('ui.default_avatar', '');
+
+        // Проставляем недостающие поля на уровне PHP (без обращения к несуществующим колонкам)
+        $items = $rows->map(function ($row) use ($defaultAvatar) {
+            $row->user_avatar = $defaultAvatar; // т.к. колонки аватара в users нет
+            $row->liked_by_me = 0;              // для гостя
+            return $row;
+        });
+
+        return response()->json([
+            'items'  => $items,
+            'next'   => $offset + $limit,
+            'limit'  => $limit,
+            'offset' => $offset,
+        ]);
     }
 }
