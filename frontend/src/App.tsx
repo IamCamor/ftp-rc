@@ -1,47 +1,42 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React from "react";
+import { Routes, Route, Navigate } from "react-router-dom";
+import BottomNav from "./components/BottomNav";
 import MapScreen from "./screens/MapScreen";
 import FeedScreen from "./screens/FeedScreen";
 import NotificationsPage from "./screens/NotificationsPage";
 import ProfilePage from "./screens/ProfilePage";
-import BottomNav from "./components/BottomNav";
-
-type Tab = "map"|"feed"|"alerts"|"profile";
-
-function routeToTab(hash: string): Tab {
-  const key = hash.replace(/^#\//,'').split(/[?#]/)[0];
-  if (key === "feed") return "feed";
-  if (key === "alerts") return "alerts";
-  if (key === "profile") return "profile";
-  return "map";
-}
+import FriendsPage from "./screens/FriendsPage";
+import RatingsPage from "./screens/RatingsPage";
+import SettingsPage from "./screens/SettingsPage";
+import MyCatchesPage from "./screens/MyCatchesPage";
+import AddCatchPage from "./screens/AddCatchPage";
+import AddPlacePage from "./screens/AddPlacePage";
+import CatchDetailPage from "./screens/CatchDetailPage";
+import PlaceDetailPage from "./screens/PlaceDetailPage";
+import WeatherPage from "./screens/WeatherPage";
 
 export default function App(){
-  const [tab, setTab] = useState<Tab>(routeToTab(location.hash || "#/map"));
-  useEffect(()=> {
-    const onHash = () => setTab(routeToTab(location.hash || "#/map"));
-    window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
-  },[]);
-
-  useEffect(()=> {
-    const target = tab === "map" ? "#/map" : tab === "feed" ? "#/feed" : tab === "alerts" ? "#/alerts" : "#/profile";
-    if (location.hash !== target) location.hash = target;
-  }, [tab]);
-
-  const onFab = () => {
-    if (tab === "map") location.hash = "#/add-place";
-    else if (tab === "feed") location.hash = "#/add-catch";
-    else alert("Скоро тут появится действие");
-  };
-
   return (
     <div className="relative w-full h-screen bg-gray-50">
-      {tab==="map" && <MapScreen/>}
-      {tab==="feed" && <FeedScreen/>}
-      {tab==="alerts" && <NotificationsPage/>}
-      {tab==="profile" && <ProfilePage/>}
+      <Routes>
+        <Route path="/" element={<Navigate to="/map" replace/>} />
+        <Route path="/map" element={<MapScreen/>} />
+        <Route path="/feed" element={<FeedScreen/>} />
+        <Route path="/alerts" element={<NotificationsPage/>} />
+        <Route path="/profile" element={<ProfilePage/>} />
+        <Route path="/friends" element={<FriendsPage/>} />
+        <Route path="/ratings" element={<RatingsPage/>} />
+        <Route path="/settings" element={<SettingsPage/>} />
+        <Route path="/my-catches" element={<MyCatchesPage/>} />
+        <Route path="/add-catch" element={<AddCatchPage/>} />
+        <Route path="/add-place" element={<AddPlacePage/>} />
+        <Route path="/catch/:id" element={<CatchDetailPage/>} />
+        <Route path="/place/:id" element={<PlaceDetailPage/>} />
+        <Route path="/weather" element={<WeatherPage/>} />
+        <Route path="*" element={<Navigate to="/map" replace/>}/>
+      </Routes>
 
-      <BottomNav active={tab} onChange={setTab} onFab={onFab}/>
+      <BottomNav/>
     </div>
   );
 }

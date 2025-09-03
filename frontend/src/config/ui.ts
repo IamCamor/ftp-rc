@@ -25,4 +25,5 @@ export const ICONS = {
   photo: "photo_camera",
   video: "videocam",
   place: "bookmark_added",
+  pin: "place",
 } as const;

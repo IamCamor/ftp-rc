@@ -1,85 +1,101 @@
-// src/screens/AddCatchPage.tsx
 import React, { useEffect, useState } from "react";
-import HeaderBar from "../components/HeaderBar";
-import { api } from "../api";
+import Icon from "../components/Icon";
+import api from "../data/api";
 
-export default function AddCatchPage() {
-  const [form, setForm] = useState<any>({ species: "", caption: "", lat: 55.7558, lng: 37.6173, caught_at: new Date().toISOString().slice(0,16) });
-  const [files, setFiles] = useState<File[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [wx, setWx] = useState<any>({});
+export default function AddCatchPage(){
+  const [lat,setLat]=useState<number>(55.75);
+  const [lng,setLng]=useState<number>(37.61);
+  const [species,setSpecies]=useState("");
+  const [length,setLength]=useState<number|''>('');
+  const [weight,setWeight]=useState<number|''>('');
+  const [style,setStyle]=useState("");
+  const [lure,setLure]=useState("");
+  const [tackle,setTackle]=useState("");
+  const [privacy,setPrivacy]=useState<"all"|"friends"|"private">("all");
+  const [caughtAt,setCaughtAt]=useState<string>(""); // yyyy-MM-ddTHH:mm
+  const [files,setFiles]=useState<FileList|null>(null);
+  const [mediaUrl,setMediaUrl]=useState<string>("");
 
-  useEffect(() => {
-    api.weather(form.lat, form.lng, Math.floor(new Date(form.caught_at).getTime()/1000)).then(setWx).catch(()=>{});
-  }, [form.lat, form.lng, form.caught_at]);
+  // погода подставляется, но не блокирует
+  const [weather,setWeather]=useState<any>(null);
+  useEffect(()=> {
+    const dt = caughtAt ? Math.floor(new Date(caughtAt).getTime()/1000) : undefined;
+    api.weather(lat,lng,dt).then(setWeather).catch(()=>{});
+  },[lat,lng,caughtAt]);
 
-  const set = (k: string, v: any) => setForm((x: any)=>({ ...x, [k]: v }));
-
-  const submit = async () => {
-    setLoading(true);
-    try {
-      let media_url = "";
-      if (files.length) {
-        const up = await api.upload(files);
-        media_url = up.items?.[0]?.url || "";
+  async function onSubmit(e:React.FormEvent){
+    e.preventDefault();
+    try{
+      let uploaded:string|undefined;
+      if(files && files.length){
+        const form = new FormData();
+        Array.from(files).forEach(f=> form.append("files[]", f));
+        const r:any = await api.upload(form);
+        uploaded = r?.items?.[0]?.url || r?.url;
       }
-      const payload = {
-        species: form.species,
-        caption: form.caption,
-        lat: Number(form.lat), lng: Number(form.lng),
-        caught_at: new Date(form.caught_at).toISOString(),
-        weather: wx?.current || null,
-        media_url,
-        privacy: "public",
+      const payload:any = {
+        lat, lng,
+        species, length: length||null, weight: weight||null,
+        style, lure, tackle, privacy,
+        caught_at: caughtAt ? new Date(caughtAt).toISOString().slice(0,19).replace('T',' ') : null,
+        photo_url: uploaded || mediaUrl || null,
+        // погоду кладём как есть (бэкенд может игнорить)
+        weather: weather || null,
       };
-      const res = await api.addCatch(payload);
-      window.location.hash = `#/catch/${res?.id || ""}`;
-    } catch (e:any) {
-      alert("Ошибка сохранения: " + (e?.message || e));
-    } finally {
-      setLoading(false);
+      const saved:any = await api.addCatch(payload);
+      window.location.href = `/catch/${saved?.id || ''}`;
+    }catch(err){
+      alert("Ошибка сохранения улова");
     }
-  };
+  }
 
   return (
-    <div className="w-full h-full">
-      <HeaderBar title="Добавить улов" />
-      <div className="mx-auto max-w-md px-3 mt-16 pb-28">
-        <div className="glass p-4 space-y-3">
-          <div>
-            <label className="text-sm text-gray-600">Вид рыбы</label>
-            <input className="w-full mt-1 glass px-3 py-2" value={form.species} onChange={e=>set("species", e.target.value)} placeholder="Окунь" />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-sm text-gray-600">Широта</label>
-              <input className="w-full mt-1 glass px-3 py-2" value={form.lat} onChange={e=>set("lat", e.target.value)} />
-            </div>
-            <div>
-              <label className="text-sm text-gray-600">Долгота</label>
-              <input className="w-full mt-1 glass px-3 py-2" value={form.lng} onChange={e=>set("lng", e.target.value)} />
-            </div>
-          </div>
-          <div>
-            <label className="text-sm text-gray-600">Дата и время</label>
-            <input type="datetime-local" className="w-full mt-1 glass px-3 py-2" value={form.caught_at} onChange={e=>set("caught_at", e.target.value)} />
-          </div>
-          <div>
-            <label className="text-sm text-gray-600">Описание</label>
-            <textarea className="w-full mt-1 glass px-3 py-2" rows={3} value={form.caption} onChange={e=>set("caption", e.target.value)} placeholder="Как и где поймал" />
-          </div>
-          <div>
-            <label className="text-sm text-gray-600">Фото/видео</label>
-            <input type="file" multiple accept="image/*,video/*" onChange={(e)=>setFiles(Array.from(e.target.files||[]))} className="mt-1" />
-          </div>
-          <div className="text-sm text-gray-600">
-            Погода: <b>{wx?.current?.temp ?? "—"}</b>, ветер <b>{wx?.current?.wind_speed ?? "—"}</b>
-          </div>
-          <button onClick={submit} disabled={loading} className="w-full py-3 rounded-xl bg-gradient-to-r from-pink-400 to-purple-500 text-white">
-            {loading ? "Сохранение…" : "Сохранить улов"}
-          </button>
-        </div>
+    <form onSubmit={onSubmit} className="pb-24">
+      <div className="sticky top-0 z-header backdrop-blur bg-white/60 border-b border-white/30 p-3 flex items-center gap-2">
+        <Icon name="photo"/><div className="font-semibold">Добавить улов</div>
       </div>
-    </div>
+      <div className="p-4 space-y-3">
+        <div>
+          <label className="block text-sm mb-1">Координаты</label>
+          <div className="flex gap-2">
+            <input className="input" placeholder="Широта" value={lat} onChange={e=>setLat(parseFloat(e.target.value)||0)}/>
+            <input className="input" placeholder="Долгота" value={lng} onChange={e=>setLng(parseFloat(e.target.value)||0)}/>
+          </div>
+          <div className="text-xs text-gray-500 mt-1">Можно выбрать точку на карте (будет добавлено в следующем коммите)</div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <div><label className="block text-sm mb-1">Вид рыбы</label><input className="input" value={species} onChange={e=>setSpecies(e.target.value)} /></div>
+          <div><label className="block text-sm mb-1">Стиль</label><input className="input" value={style} onChange={e=>setStyle(e.target.value)} /></div>
+          <div><label className="block text-sm mb-1">Приманка</label><input className="input" value={lure} onChange={e=>setLure(e.target.value)} /></div>
+          <div><label className="block text-sm mb-1">Снасть</label><input className="input" value={tackle} onChange={e=>setTackle(e.target.value)} /></div>
+          <div><label className="block text-sm mb-1">Длина (см)</label><input className="input" type="number" value={length} onChange={e=>setLength(e.target.value===""? "" : Number(e.target.value))} /></div>
+          <div><label className="block text-sm mb-1">Вес (г)</label><input className="input" type="number" value={weight} onChange={e=>setWeight(e.target.value===""? "" : Number(e.target.value))} /></div>
+        </div>
+
+        <div>
+          <label className="block text-sm mb-1">Время поимки</label>
+          <input className="input" type="datetime-local" value={caughtAt} onChange={e=>setCaughtAt(e.target.value)} />
+        </div>
+
+        <div>
+          <label className="block text-sm mb-1">Фото/Видео</label>
+          <input type="file" multiple accept="image/*,video/*" onChange={e=>setFiles(e.target.files)} />
+          <div className="text-xs text-gray-500 mt-1">Или URL:</div>
+          <input className="input" placeholder="https://..." value={mediaUrl} onChange={e=>setMediaUrl(e.target.value)} />
+        </div>
+
+        <div>
+          <label className="block text-sm mb-1">Доступность</label>
+          <select className="input" value={privacy} onChange={e=>setPrivacy(e.target.value as any)}>
+            <option value="all">Публично</option>
+            <option value="friends">Для друзей</option>
+            <option value="private">Приватно</option>
+          </select>
+        </div>
+
+        <button className="px-4 py-2 rounded-xl bg-black text-white">Сохранить</button>
+      </div>
+    </form>
   );
 }

@@ -1,57 +1,77 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { api } from '../lib/api';
-import MapView from '../components/MapView';
+import React, { useEffect, useState } from "react";
+import Icon from "../components/Icon";
+import api from "../data/api";
 
-type Point = { id:number; title:string; lat:number; lng:number; category?:string; };
+// Предполагается, что leaflet уже подключён в проекте
+// Если используете react-leaflet — адаптируйте импорты.
+declare const L:any;
+
+type Point = {
+  id:number; title:string; lat:number; lng:number;
+  category?:string; photo_url?:string; media_url?:string;
+  type?:string;
+};
 
 export default function MapScreen(){
-  const [points, setPoints] = useState<Point[]>([]);
-  const [bbox, setBbox] = useState<[number,number,number,number] | undefined>(undefined);
-  const [filter, setFilter] = useState<string|undefined>(undefined);
+  const [points,setPoints]=useState<Point[]>([]);
+  const [map,setMap]=useState<any>(null);
 
-  useEffect(()=>{
-    // Пример bbox для Москвы (если нет гео)
-    const fallbackBbox:[number,number,number,number] = [37.2,55.5,37.9,55.95];
-    const load = async ()=>{
-      const params:any = { limit: 500, bbox: (bbox||fallbackBbox).join(',') };
-      if (filter) params.filter = filter;
-      const j = await api.points(params);
-      setPoints(j.items || []);
-    };
-    load().catch(console.error);
-  },[bbox, filter]);
+  useEffect(()=> {
+    if (typeof window !== "undefined" && (window as any).L && !map) {
+      const m = L.map('map', { zoomControl: true }).setView([55.75, 37.61], 10);
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap'
+      }).addTo(m);
+      setMap(m);
+    }
+  },[map]);
 
-  // UI для фильтров (минимально)
-  const filters = useMemo(()=>[
-    {key:undefined, title:'Все'},
-    {key:'spot', title:'Споты'},
-    {key:'shop', title:'Магазины'},
-    {key:'slip', title:'Слипы'},
-    {key:'camp', title:'Кемпинги'},
-    {key:'catch', title:'Уловы'},
-  ],[]);
+  useEffect(()=> {
+    (async ()=>{
+      try{
+        const j:any = await api.points(`?limit=500`);
+        const items:Point[] = j?.items || [];
+        setPoints(items);
+      }catch(e){}
+    })();
+  },[]);
+
+  useEffect(()=> {
+    if(!map) return;
+    const layer = L.layerGroup().addTo(map);
+    points.forEach(p=>{
+      const marker = L.marker([p.lat, p.lng]).addTo(layer);
+      const img = p.photo_url || p.media_url;
+      const content = `
+        <div style="min-width:200px">
+          <div style="font-weight:600;margin-bottom:6px">${p.title||"Точка"}</div>
+          ${img ? `<img src="${img}" style="width:100%;border-radius:10px;cursor:pointer" id="pin-img-${p.id}"/>` : ""}
+          <div style="margin-top:6px">
+            <a href="/place/${p.id}" style="color:#2563eb;text-decoration:none">Открыть место</a>
+          </div>
+        </div>`;
+      marker.bindPopup(content);
+
+      marker.on('popupopen', ()=>{
+        const el = document.getElementById(`pin-img-${p.id}`);
+        if(el){
+          el.addEventListener('click', ()=> {
+            window.location.href = `/place/${p.id}`;
+          }, { once:true });
+        }
+      });
+    });
+    return ()=> { map.removeLayer(layer); };
+  },[map, points]);
 
   return (
-    <div className="w-full h-full pt-16 pb-16">
-      <div className="absolute top-16 left-0 right-0 z-30 px-4">
-        <div className="overflow-x-auto no-scrollbar">
-          <div className="inline-flex gap-2 backdrop-blur-xl bg-white/60 border border-white/40 rounded-2xl p-2">
-            {filters.map(f=>(
-              <button
-                key={String(f.key)}
-                onClick={()=>setFilter(f.key as any)}
-                className={`px-3 py-1 rounded-xl text-sm ${filter===f.key ? 'bg-gradient-to-r from-pink-500 to-fuchsia-600 text-white' : 'bg-white/70 text-gray-800 border border-white/60'}`}
-              >
-                {f.title}
-              </button>
-            ))}
-          </div>
-        </div>
+    <div className="w-full h-full relative">
+      <div className="sticky top-0 z-header backdrop-blur bg-white/60 border-b border-white/30 p-3 flex items-center justify-between">
+        <div className="font-semibold inline-flex items-center gap-2"><Icon name="map"/> Карта</div>
+        <a href="/weather" className="text-sm inline-flex items-center gap-1"><Icon name="weather"/> Погода</a>
       </div>
-
-      <div className="absolute inset-0 top-16 bottom-16 z-10">
-        <MapView points={points} bbox={bbox}/>
-      </div>
+      <div id="map" className="absolute inset-0 z-map" />
     </div>
   );
 }
