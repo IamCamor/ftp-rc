@@ -33,8 +33,8 @@ return [
     | CORS_ALLOWED_ORIGINS=https://fishtrackpro.ru,https://www.fishtrackpro.ru,http://localhost:5173
     |
     */
-    'allowed_origins' => array_filter(array_map('trim', explode(',', env('CORS_ALLOWED_ORIGINS',
-        'https://fishtrackpro.ru,https://www.fishtrackpro.ru,http://localhost:5173'
+   'allowed_origins' => array_filter(array_map('trim', explode(',', env('CORS_ALLOWED_ORIGINS',
+        'https://api.fishtrackpro.ru,https://fishtrackpro.ru,https://www.fishtrackpro.ru,http://localhost:5173'
     )))),
 
     /*
