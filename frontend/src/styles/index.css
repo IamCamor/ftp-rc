@@ -1,0 +1,27 @@
+/* src/styles/index.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* keep @imports before arbitrary CSS per PostCSS rules */
+@import "leaflet/dist/leaflet.css";
+
+:root {
+  --glass-bg: rgba(255, 255, 255, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.6);
+}
+
+.glass {
+  @apply backdrop-blur-md;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 8px 28px rgba(0,0,0,0.08);
+  border-radius: 16px;
+}
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+.leaflet-container {
+  font: inherit;
+}

@@ -1,73 +1,85 @@
-import React,{useEffect,useMemo,useState} from "react";
-import {Card,CardContent,Button,Input,Textarea,Select} from "../components/ui";
-import MapPicker from "../components/map/MapPicker";
-import {api, uploadFile} from "../lib/api";
-import {toast} from "../lib/toast";
+// src/screens/AddCatchPage.tsx
+import React, { useEffect, useState } from "react";
+import HeaderBar from "../components/HeaderBar";
+import { api } from "../api";
 
-export default function AddCatchPage(){
-  const [form,setForm]=useState({lat:55.7558,lng:37.6173,species:"",length:"",weight:"",style:"",lure:"",tackle:"",notes:"",photo_url:"",caught_at:"",privacy:"all",water_type:"",water_temp:"",wind_speed:"",pressure:""});
-  const set=(k:string,v:any)=>setForm(p=>({...p,[k]:v}));
-  const ts=useMemo(()=> form.caught_at? Math.floor(new Date(form.caught_at).getTime()/1000) : null,[form.caught_at]);
-  useEffect(()=>{ if(!form.lat||!form.lng) return; (async()=>{
-      try{ const j:any=await api.weather({lat:form.lat,lng:form.lng,dt:ts||undefined});
-        const c = j?.data?.current ?? null;
-        if(c){ if(c.temp!=null) set('water_temp',c.temp); if(c.wind_speed!=null) set('wind_speed',c.wind_speed); if(c.pressure!=null) set('pressure',c.pressure); }
-      }catch{}
-  })(); },[form.lat,form.lng,ts]);
-  const onUpload=async(e:React.ChangeEvent<HTMLInputElement>)=>{
-    const f=e.target.files?.[0]; if(!f) return;
-    try{ const u=await uploadFile(f); set('photo_url',u.url); toast('Файл загружен'); }catch{ toast('Ошибка загрузки'); }
-    e.target.value="";
+export default function AddCatchPage() {
+  const [form, setForm] = useState<any>({ species: "", caption: "", lat: 55.7558, lng: 37.6173, caught_at: new Date().toISOString().slice(0,16) });
+  const [files, setFiles] = useState<File[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [wx, setWx] = useState<any>({});
+
+  useEffect(() => {
+    api.weather(form.lat, form.lng, Math.floor(new Date(form.caught_at).getTime()/1000)).then(setWx).catch(()=>{});
+  }, [form.lat, form.lng, form.caught_at]);
+
+  const set = (k: string, v: any) => setForm((x: any)=>({ ...x, [k]: v }));
+
+  const submit = async () => {
+    setLoading(true);
+    try {
+      let media_url = "";
+      if (files.length) {
+        const up = await api.upload(files);
+        media_url = up.items?.[0]?.url || "";
+      }
+      const payload = {
+        species: form.species,
+        caption: form.caption,
+        lat: Number(form.lat), lng: Number(form.lng),
+        caught_at: new Date(form.caught_at).toISOString(),
+        weather: wx?.current || null,
+        media_url,
+        privacy: "public",
+      };
+      const res = await api.addCatch(payload);
+      window.location.hash = `#/catch/${res?.id || ""}`;
+    } catch (e:any) {
+      alert("Ошибка сохранения: " + (e?.message || e));
+    } finally {
+      setLoading(false);
+    }
   };
-  const submit=async(e:React.FormEvent)=>{ e.preventDefault();
-    try{
-      await api.addCatch({
-        lat:Number(form.lat),lng:Number(form.lng),species:form.species||null,length:form.length?Number(form.length):null,
-        weight:form.weight?Number(form.weight):null,style:form.style||null,lure:form.lure||null,tackle:form.tackle||null,
-        notes:form.notes||null,photo_url:form.photo_url||null,caught_at:form.caught_at||null,privacy:form.privacy||"all",
-        water_type:form.water_type||null,water_temp:form.water_temp?Number(form.water_temp):null,wind_speed:form.wind_speed?Number(form.wind_speed):null,pressure:form.pressure?Number(form.pressure):null
-      });
-      toast('Улов добавлен'); location.hash="#/feed";
-    }catch{ toast('Ошибка сохранения'); }
-  };
-  return <div className="p-4 pb-28 max-w-3xl mx-auto">
-    <Card><CardContent>
-      <form onSubmit={submit} className="space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <Input placeholder="Вид рыбы" value={form.species} onChange={e=>set('species',e.target.value)} />
-          <Input placeholder="Дата/время" type="datetime-local" value={form.caught_at} onChange={e=>set('caught_at',e.target.value)} />
-          <Input placeholder="Вес (кг)" value={form.weight} onChange={e=>set('weight',e.target.value)} />
-          <Input placeholder="Длина (см)" value={form.length} onChange={e=>set('length',e.target.value)} />
-          <Input placeholder="Стиль" value={form.style} onChange={e=>set('style',e.target.value)} />
-          <Input placeholder="Приманка" value={form.lure} onChange={e=>set('lure',e.target.value)} />
-          <Input placeholder="Снасти" value={form.tackle} onChange={e=>set('tackle',e.target.value)} />
+
+  return (
+    <div className="w-full h-full">
+      <HeaderBar title="Добавить улов" />
+      <div className="mx-auto max-w-md px-3 mt-16 pb-28">
+        <div className="glass p-4 space-y-3">
+          <div>
+            <label className="text-sm text-gray-600">Вид рыбы</label>
+            <input className="w-full mt-1 glass px-3 py-2" value={form.species} onChange={e=>set("species", e.target.value)} placeholder="Окунь" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-sm text-gray-600">Широта</label>
+              <input className="w-full mt-1 glass px-3 py-2" value={form.lat} onChange={e=>set("lat", e.target.value)} />
+            </div>
+            <div>
+              <label className="text-sm text-gray-600">Долгота</label>
+              <input className="w-full mt-1 glass px-3 py-2" value={form.lng} onChange={e=>set("lng", e.target.value)} />
+            </div>
+          </div>
+          <div>
+            <label className="text-sm text-gray-600">Дата и время</label>
+            <input type="datetime-local" className="w-full mt-1 glass px-3 py-2" value={form.caught_at} onChange={e=>set("caught_at", e.target.value)} />
+          </div>
+          <div>
+            <label className="text-sm text-gray-600">Описание</label>
+            <textarea className="w-full mt-1 glass px-3 py-2" rows={3} value={form.caption} onChange={e=>set("caption", e.target.value)} placeholder="Как и где поймал" />
+          </div>
+          <div>
+            <label className="text-sm text-gray-600">Фото/видео</label>
+            <input type="file" multiple accept="image/*,video/*" onChange={(e)=>setFiles(Array.from(e.target.files||[]))} className="mt-1" />
+          </div>
+          <div className="text-sm text-gray-600">
+            Погода: <b>{wx?.current?.temp ?? "—"}</b>, ветер <b>{wx?.current?.wind_speed ?? "—"}</b>
+          </div>
+          <button onClick={submit} disabled={loading} className="w-full py-3 rounded-xl bg-gradient-to-r from-pink-400 to-purple-500 text-white">
+            {loading ? "Сохранение…" : "Сохранить улов"}
+          </button>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <Input placeholder="Широта (lat)" value={form.lat} onChange={e=>set('lat',Number(e.target.value))} />
-          <Input placeholder="Долгота (lng)" value={form.lng} onChange={e=>set('lng',Number(e.target.value))} />
-        </div>
-        <MapPicker lat={form.lat} lng={form.lng} onPick={(a,b)=>{set('lat',a);set('lng',b);}} height={420}/>
-        <div className="flex items-center gap-3">
-          <label className="rounded-full px-4 py-2 bg-white/70 border border-white/60 cursor-pointer">
-            Загрузить фото/видео <input type="file" className="hidden" accept="image/*,video/*" onChange={onUpload}/>
-          </label>
-          {form.photo_url && <span className="text-xs break-all">{form.photo_url}</span>}
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <Select value={form.privacy} onChange={e=>set('privacy',e.target.value)}>
-            <option value="all">Публично</option><option value="friends">Друзья</option><option value="private">Приватно</option>
-          </Select>
-          <Input placeholder="Тип воды" value={form.water_type} onChange={e=>set('water_type',e.target.value)} />
-          <Input placeholder="Температура (°C)" value={form.water_temp} onChange={e=>set('water_temp',e.target.value)} />
-          <Input placeholder="Ветер (м/с)" value={form.wind_speed} onChange={e=>set('wind_speed',e.target.value)} />
-          <Input placeholder="Давление (гПа)" value={form.pressure} onChange={e=>set('pressure',e.target.value)} />
-        </div>
-        <Textarea placeholder="Заметки" value={form.notes} onChange={e=>set('notes',e.target.value)} />
-        <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={()=>history.back()}>Отмена</Button>
-          <Button type="submit">Сохранить улов</Button>
-        </div>
-      </form>
-    </CardContent></Card>
-  </div>;
+      </div>
+    </div>
+  );
 }

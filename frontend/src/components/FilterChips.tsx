@@ -1,16 +1,36 @@
+// src/components/FilterChips.tsx
 import React from "react";
-export const FILTERS = ["Все","Споты","Магазины","Слипы","Кемпинги","Уловы"] as const;
-export type FilterName = typeof FILTERS[number];
-export default function FilterChips({active,onChange}:{active:FilterName; onChange:(f:FilterName)=>void}) {
+
+const FILTERS = [
+  { id: "all", label: "Все" },
+  { id: "spot", label: "Споты" },
+  { id: "shop", label: "Магазины" },
+  { id: "slip", label: "Слипы" },
+  { id: "camp", label: "Кемпинги" },
+  { id: "catch", label: "Уловы" },
+];
+
+export default function FilterChips({
+  active,
+  onChange,
+}: {
+  active: string;
+  onChange: (id: string) => void;
+}) {
   return (
-    <div className="fixed top-16 left-0 w-full px-3 z-[1190]">
-      <div className="flex gap-3 overflow-x-auto pb-2 no-scrollbar">
-        {FILTERS.map((f)=> {
-          const is = active===f;
+    <div className="mx-auto max-w-md px-3 mt-16">
+      <div className="glass overflow-x-auto no-scrollbar flex gap-2 p-2">
+        {FILTERS.map((f) => {
+          const is = active === f.id;
           return (
-            <button key={f} onClick={()=>onChange(f)}
-              className={"px-4 py-2 rounded-xl text-sm whitespace-nowrap "+(is? "text-white shadow grad-ig":"glass text-gray-700")}>
-              {f}
+            <button
+              key={f.id}
+              onClick={() => onChange(f.id)}
+              className={`px-3 py-1.5 rounded-full border ${
+                is ? "bg-pink-500 text-white border-pink-400" : "bg-white/40 text-gray-700 border-white/60"
+              }`}
+            >
+              {f.label}
             </button>
           );
         })}

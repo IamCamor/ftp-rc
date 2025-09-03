@@ -1,42 +1,55 @@
-import React,{useEffect,useState} from "react";
+// src/App.tsx
+import React, { useMemo, useState, useEffect } from "react";
 import MapScreen from "./screens/MapScreen";
 import FeedScreen from "./screens/FeedScreen";
+import ProfileScreen from "./screens/ProfileScreen";
+import WeatherPage from "./screens/WeatherPage";
 import AddCatchPage from "./screens/AddCatchPage";
 import AddPlacePage from "./screens/AddPlacePage";
 import CatchDetailPage from "./screens/CatchDetailPage";
 import BottomNav from "./components/BottomNav";
 
-type Route = {path:string, params:Record<string,string>};
-
-function parseHash():Route{
-  const h=location.hash.replace(/^#\/?/,''); // e.g. "catch/12?x=1"
-  const [pathPart, qs] = h.split('?');
-  const params:Object = Object.fromEntries(new URLSearchParams(qs||'').entries());
-  return {path: pathPart||'', params: params as any};
+type Tab = "map" | "feed" | "alerts" | "profile";
+function useHash() {
+  const [hash, setHash] = useState(window.location.hash || "#/map");
+  useEffect(() => {
+    const on = () => setHash(window.location.hash || "#/map");
+    window.addEventListener("hashchange", on);
+    return () => window.removeEventListener("hashchange", on);
+  }, []);
+  return [hash, (h:string)=>{ window.location.hash = h; setHash(h);} ] as const;
 }
 
-export default function App(){
-  const [route,setRoute]=useState<Route>(parseHash());
-  useEffect(()=>{ const onHash=()=>setRoute(parseHash()); window.addEventListener('hashchange',onHash); return ()=>window.removeEventListener('hashchange',onHash);},[]);
+export default function App() {
+  const [hash] = useHash();
+  const [tab, setTab] = useState<Tab>("map");
 
-  const activeTab = route.path.startsWith('feed') ? 'feed' : route.path==='' ? 'map' : route.path.startsWith('profile') ? 'profile' : 'map';
+  useEffect(() => {
+    if (hash.startsWith("#/feed")) setTab("feed");
+    else if (hash.startsWith("#/profile")) setTab("profile");
+    else setTab("map");
+  }, [hash]);
 
-  let page:any=null;
-  if(route.path==='') page=<MapScreen/>;
-  else if(route.path.startsWith('feed')) page=<FeedScreen/>;
-  else if(route.path.startsWith('add/catch')) page=<AddCatchPage/>;
-  else if(route.path.startsWith('add/place')) page=<AddPlacePage/>;
-  else if(route.path.startsWith('catch/')){
-    const id=parseInt(route.path.split('/')[1]||'0',10); page=<CatchDetailPage id={id}/>;
-  } else page=<MapScreen/>;
+  const onFab = () => {
+    if (hash.startsWith("#/feed")) window.location.hash = "#/add-catch";
+    else window.location.hash = "#/add-place";
+  };
 
-  return <div className="w-full h-screen bg-gray-100">
-    {page}
-    <BottomNav onFab={()=>{ location.hash="#/add/catch"; }} active={activeTab as any} onChange={(t:any)=>{
-      if(t==='map') location.hash='#/';
-      else if(t==='feed') location.hash='#/feed';
-      else if(t==='profile') location.hash='#/profile';
-      else location.hash='#/';
-    }}/>
-  </div>;
+  const main = () => {
+    if (hash === "#/map") return <MapScreen />;
+    if (hash === "#/feed") return <FeedScreen />;
+    if (hash === "#/profile") return <ProfileScreen />;
+    if (hash.startsWith("#/weather")) return <WeatherPage />;
+    if (hash.startsWith("#/add-catch")) return <AddCatchPage />;
+    if (hash.startsWith("#/add-place")) return <AddPlacePage />;
+    if (hash.startsWith("#/catch/")) return <CatchDetailPage id={hash.split("/")[2]} />;
+    return <MapScreen />;
+  };
+
+  return (
+    <div className="relative w-full h-screen bg-gray-100">
+      {main()}
+      <BottomNav onFab={onFab} active={tab} onChange={(t)=>{ setTab(t); window.location.hash = `#/${t}`; }} />
+    </div>
+  );
 }
