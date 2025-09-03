@@ -1,52 +1,59 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { MapContainer, TileLayer, CircleMarker, Popup, useMapEvents } from "react-leaflet";
-import type { LatLngBounds, LatLngExpression } from "leaflet";
-import { getPoints } from "../data/api";
-import type { Point } from "../data/types";
-import { useDebounce } from "../utils/useDebounce";
+import React, { useEffect } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
 
-export default function MapView({ filter, q }:{filter:"Все"|"Споты"|"Магазины"|"Слипы"|"Кемпинги"|"Уловы"; q:string}) {
-  const [points,setPoints]=useState<Point[]>([]); const [error,setError]=useState<string|null>(null);
-  const [bounds,setBounds]=useState<LatLngBounds|null>(null); const debouncedQ=useDebounce(q,300); const loading=useRef(false);
-  const center:LatLngExpression=[55.7558,37.6173];
-  const mapFilter:Record<string,string|undefined>={ "Все":undefined,"Споты":"spot","Магазины":"shop","Слипы":"slip","Кемпинги":"camp","Уловы":"catch" };
+// фиксим иконки leaflet (без webpack loaders)
+const icon = new L.Icon({
+  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+  shadowSize: [41, 41],
+  shadowAnchor: [12, 41],
+});
 
-  function BoundsWatcher({on}:{on:(b:LatLngBounds)=>void}){ useMapEvents({moveend:(e)=>on(e.target.getBounds()), zoomend:(e)=>on(e.target.getBounds())}); return null; }
+function FitBounds({ bbox }: { bbox?: [number,number,number,number] }) {
+  const map = useMap();
+  useEffect(()=>{
+    if (!bbox) return;
+    const [[minLat,minLng],[maxLat,maxLng]] = [[bbox[1],bbox[0]],[bbox[3],bbox[2]]];
+    map.fitBounds([[minLat,minLng],[maxLat,maxLng]], { padding:[24,24] });
+  },[bbox]);
+  return null;
+}
 
-  useEffect(()=>{ let cancel=false;
-    (async()=>{
-      if(loading.current) return; loading.current=true; setError(null);
-      try{
-        const t=mapFilter[filter]; const bbox=bounds?[bounds.getWest(),bounds.getSouth(),bounds.getEast(),bounds.getNorth()] as [number,number,number,number]:undefined;
-        const items=await getPoints({filter:t,bbox,limit:500,q:debouncedQ}); if(!cancel) setPoints(items);
-      }catch(e:any){ if(!cancel) setError(e?.message??"Ошибка загрузки"); } finally{ loading.current=false; }
-    })(); return ()=>{cancel=true};
-  },[filter,bounds,debouncedQ]);
-
-  const shown=useMemo(()=>{ const text=debouncedQ.trim().toLowerCase(); if(!text) return points;
-    return points.filter(p=>[p.title,p.description??"",p.address??"",...(p.tags??[])].join(" ").toLowerCase().includes(text));
-  },[points,debouncedQ]);
-
+type Point = {
+  id:number; title:string; lat:number; lng:number; category?:string;
+};
+export default function MapView({
+  points, center=[55.751244,37.618423], zoom=11, bbox
+}:{ points:Point[]; center?:[number,number]; zoom?:number; bbox?:[number,number,number,number]}) {
   return (
-    <div className="w-full h-full">
-      <MapContainer center={center} zoom={12} className="w-full h-full">
-        <TileLayer url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" attribution='&copy; <a href="https://carto.com/">CARTO</a>'/>
-        <BoundsWatcher on={setBounds}/>
-        {shown.map(p=>(
-          <CircleMarker key={p.id} center={[p.lat,p.lng]} radius={8} pathOptions={{color:"#FF7CA3",weight:2,fillColor:"#FFB88C",fillOpacity:0.9}}>
+    <div className="relative w-full h-full">
+      <MapContainer
+        center={center}
+        zoom={zoom}
+        className="w-full h-full rounded-2xl overflow-hidden"
+        zoomControl={false}
+      >
+        <TileLayer
+          attribution='&copy; CARTO & OpenStreetMap'
+          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+        />
+        {points.map(p=>(
+          <Marker key={p.id} position={[p.lat, p.lng]} icon={icon}>
             <Popup>
-              <div className="text-sm max-w-[220px]">
-                <div className="font-medium">{p.title}</div>
-                {p.type && <div className="text-gray-500 mt-1">Тип: {p.type}</div>}
-                {p.description && <div className="mt-1">{p.description}</div>}
-                {p.address && <div className="mt-1 text-gray-600">{p.address}</div>}
-                {p.tags?.length ? <div className="mt-1 text-xs text-gray-500">#{p.tags.join(" #")}</div> : null}
+              <div className="text-sm">
+                <div className="font-semibold">{p.title || 'Точка'}</div>
+                {p.category && <div className="text-xs text-gray-500 mt-1">Категория: {p.category}</div>}
               </div>
             </Popup>
-          </CircleMarker>
+          </Marker>
         ))}
+        <FitBounds bbox={bbox}/>
       </MapContainer>
-      {error && <div className="fixed top-24 left-1/2 -translate-x-1/2 px-3 py-1 text-xs rounded-md text-white bg-red-500/80 z-[1400]">{error}</div>}
     </div>
   );
 }

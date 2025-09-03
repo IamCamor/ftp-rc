@@ -1,64 +1,56 @@
-// src/screens/MapScreen.tsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import HeaderBar from "../components/HeaderBar";
-import FilterChips from "../components/FilterChips";
-import { api, BBox } from "../api";
+import React, { useEffect, useMemo, useState } from 'react';
+import { api } from '../lib/api';
+import MapView from '../components/MapView';
 
-type Point = {
-  id: number;
-  lat: number;
-  lng: number;
-  title: string;
-  category?: string;
-};
+type Point = { id:number; title:string; lat:number; lng:number; category?:string; };
 
-export default function MapScreen() {
-  const [filter, setFilter] = useState<string>("all");
-  const [items, setItems] = useState<Point[]>([]);
-  const mapRef = useRef<HTMLDivElement>(null);
+export default function MapScreen(){
+  const [points, setPoints] = useState<Point[]>([]);
+  const [bbox, setBbox] = useState<[number,number,number,number] | undefined>(undefined);
+  const [filter, setFilter] = useState<string|undefined>(undefined);
 
-  const bboxFromMap = (): BBox | null => {
-    // Simple fallback bbox around Moscow if map lib isn't mounted
-    return [37.2, 55.5, 37.9, 55.95];
-  };
+  useEffect(()=>{
+    // Пример bbox для Москвы (если нет гео)
+    const fallbackBbox:[number,number,number,number] = [37.2,55.5,37.9,55.95];
+    const load = async ()=>{
+      const params:any = { limit: 500, bbox: (bbox||fallbackBbox).join(',') };
+      if (filter) params.filter = filter;
+      const j = await api.points(params);
+      setPoints(j.items || []);
+    };
+    load().catch(console.error);
+  },[bbox, filter]);
 
-  const load = async () => {
-    const bbox = bboxFromMap();
-    const p: any = { limit: 500 };
-    if (filter !== "all") p.filter = filter;
-    if (bbox) p.bbox = bbox;
-    const rsp = await api.points(p);
-    setItems(rsp.items || []);
-  };
-
-  useEffect(() => {
-    load().catch(console.warn);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter]);
+  // UI для фильтров (минимально)
+  const filters = useMemo(()=>[
+    {key:undefined, title:'Все'},
+    {key:'spot', title:'Споты'},
+    {key:'shop', title:'Магазины'},
+    {key:'slip', title:'Слипы'},
+    {key:'camp', title:'Кемпинги'},
+    {key:'catch', title:'Уловы'},
+  ],[]);
 
   return (
-    <div className="w-full h-full">
-      <HeaderBar title="FishTrack" onWeather={() => (window.location.hash = "#/weather")} onProfile={() => (window.location.hash = "#/profile")} />
-
-      <FilterChips active={filter} onChange={setFilter} />
-
-      <div className="mx-auto max-w-md px-3 mt-3">
-        <div ref={mapRef} className="w-full h-[70vh] rounded-2xl overflow-hidden relative ring-1 ring-white/60 bg-gradient-to-br from-sky-50 to-violet-50">
-          {/* Lightweight canvas map placeholder to avoid external lib issues.
-              If Leaflet/Maplibre is present, you can replace this block. */}
-          <div className="absolute inset-0 flex items-center justify-center text-gray-500">
-            Карта (замените на реальную, если подключена)
-          </div>
-
-          {/* markers */}
-          <div className="absolute inset-0 pointer-events-none">
-            {items.slice(0, 60).map((p) => (
-              <div key={p.id} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
-                <div className="w-3 h-3 bg-pink-500 rounded-full shadow" title={p.title} />
-              </div>
+    <div className="w-full h-full pt-16 pb-16">
+      <div className="absolute top-16 left-0 right-0 z-30 px-4">
+        <div className="overflow-x-auto no-scrollbar">
+          <div className="inline-flex gap-2 backdrop-blur-xl bg-white/60 border border-white/40 rounded-2xl p-2">
+            {filters.map(f=>(
+              <button
+                key={String(f.key)}
+                onClick={()=>setFilter(f.key as any)}
+                className={`px-3 py-1 rounded-xl text-sm ${filter===f.key ? 'bg-gradient-to-r from-pink-500 to-fuchsia-600 text-white' : 'bg-white/70 text-gray-800 border border-white/60'}`}
+              >
+                {f.title}
+              </button>
             ))}
           </div>
         </div>
+      </div>
+
+      <div className="absolute inset-0 top-16 bottom-16 z-10">
+        <MapView points={points} bbox={bbox}/>
       </div>
     </div>
   );

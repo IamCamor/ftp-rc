@@ -1,55 +1,30 @@
-// src/App.tsx
-import React, { useMemo, useState, useEffect } from "react";
-import MapScreen from "./screens/MapScreen";
-import FeedScreen from "./screens/FeedScreen";
-import ProfileScreen from "./screens/ProfileScreen";
-import WeatherPage from "./screens/WeatherPage";
-import AddCatchPage from "./screens/AddCatchPage";
-import AddPlacePage from "./screens/AddPlacePage";
-import CatchDetailPage from "./screens/CatchDetailPage";
-import BottomNav from "./components/BottomNav";
+import React, { useEffect, useState } from 'react';
+import Header from './components/Header';
+import MapScreen from './screens/MapScreen';
+import WeatherScreen from './screens/WeatherScreen';
 
-type Tab = "map" | "feed" | "alerts" | "profile";
-function useHash() {
-  const [hash, setHash] = useState(window.location.hash || "#/map");
-  useEffect(() => {
-    const on = () => setHash(window.location.hash || "#/map");
-    window.addEventListener("hashchange", on);
-    return () => window.removeEventListener("hashchange", on);
-  }, []);
-  return [hash, (h:string)=>{ window.location.hash = h; setHash(h);} ] as const;
+function useHash(): string {
+  const [h,setH]=useState(window.location.hash||'#/map');
+  useEffect(()=>{
+    const on = ()=>setH(window.location.hash||'#/map');
+    window.addEventListener('hashchange',on);
+    return ()=>window.removeEventListener('hashchange',on);
+  },[]);
+  return h;
 }
 
-export default function App() {
-  const [hash] = useHash();
-  const [tab, setTab] = useState<Tab>("map");
-
-  useEffect(() => {
-    if (hash.startsWith("#/feed")) setTab("feed");
-    else if (hash.startsWith("#/profile")) setTab("profile");
-    else setTab("map");
-  }, [hash]);
-
-  const onFab = () => {
-    if (hash.startsWith("#/feed")) window.location.hash = "#/add-catch";
-    else window.location.hash = "#/add-place";
-  };
-
-  const main = () => {
-    if (hash === "#/map") return <MapScreen />;
-    if (hash === "#/feed") return <FeedScreen />;
-    if (hash === "#/profile") return <ProfileScreen />;
-    if (hash.startsWith("#/weather")) return <WeatherPage />;
-    if (hash.startsWith("#/add-catch")) return <AddCatchPage />;
-    if (hash.startsWith("#/add-place")) return <AddPlacePage />;
-    if (hash.startsWith("#/catch/")) return <CatchDetailPage id={hash.split("/")[2]} />;
-    return <MapScreen />;
-  };
+export default function App(){
+  const hash = useHash();
+  const route = hash.replace(/^#\//,'') || 'map';
 
   return (
-    <div className="relative w-full h-screen bg-gray-100">
-      {main()}
-      <BottomNav onFab={onFab} active={tab} onChange={(t)=>{ setTab(t); window.location.hash = `#/${t}`; }} />
+    <div className="w-full h-screen relative bg-gray-50">
+      <Header />
+      {route==='map' && <MapScreen/>}
+      {route==='weather' && <WeatherScreen/>}
+      {route!=='map' && route!=='weather' && (
+        <div className="pt-20 px-4 text-gray-500">Страница в разработке</div>
+      )}
     </div>
   );
 }

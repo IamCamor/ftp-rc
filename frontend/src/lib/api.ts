@@ -1,39 +1,41 @@
-export const API_BASE = (import.meta as any).env?.VITE_API_BASE ?? "https://api.fishtrackpro.ru";
+export const API_BASE = (window as any).__API__ || 'https://api.fishtrackpro.ru/api/v1';
 
-const url = (p:string)=> new URL(p, API_BASE).toString();
-
-export async function getJSON<T=any>(p:string, q?:Record<string, any>) {
-  const u = new URL(url(p)); if(q) Object.entries(q).forEach(([k,v])=> (v!==undefined&&v!==null) && u.searchParams.set(k,String(v)));
-  const r = await fetch(u.toString(),{headers:{'Accept':'application/json'}});
-  if(!r.ok) throw new Error(`${r.status}`);
-  return r.json() as Promise<T>;
-}
-export async function postJSON<T=any>(p:string, body:any){
-  const r=await fetch(url(p),{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(body)});
-  if(!r.ok) throw new Error(`${r.status}`);
-  return r.json() as Promise<T>;
-}
-export async function uploadFile(file:File){
-  const form=new FormData(); form.append('file',file);
-  const r=await fetch(url('/api/v1/upload'),{method:'POST',body:form});
-  if(!r.ok) throw new Error('UPLOAD');
-  return r.json() as Promise<{ok:boolean,url:string,type:'image'|'video'}>;
+async function req(path: string, init?: RequestInit) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' , ...(init?.headers||{}) },
+    ...init
+  });
+  if (!res.ok) {
+    let p = null; try { p = await res.text(); } catch {}
+    console.error('HTTP', res.status, path, p);
+    throw new Error(String(res.status));
+  }
+  const ct = res.headers.get('content-type')||'';
+  return ct.includes('application/json') ? res.json() : res.text();
 }
 
-// API wrappers
 export const api = {
-  points: (q:any)=> getJSON('/api/v1/map/points', q),
-  pointCats: ()=> getJSON('/api/v1/points/categories'),
-  addPoint: (body:any)=> postJSON('/api/v1/points', body),
+  points: (params: {limit?:number; filter?:string; bbox?: string}) => {
+    const q = new URLSearchParams();
+    if (params.limit) q.set('limit', String(params.limit));
+    if (params.filter) q.set('filter', params.filter);
+    if (params.bbox) q.set('bbox', params.bbox);
+    return req(`/map/points?${q.toString()}`);
+  },
+  feed: (params: {limit?:number; offset?:number}) => {
+    const q = new URLSearchParams();
+    if (params.limit!=null) q.set('limit', String(params.limit));
+    if (params.offset!=null) q.set('offset', String(params.offset));
+    return req(`/feed?${q.toString()}`);
+  },
+  catchById: (id:number) => req(`/catch/${id}`),
+  addComment: (id:number, text:string, parent_id?:number|null) =>
+    req(`/catch/${id}/comments`, { method:'POST', body: JSON.stringify({ text, parent_id: parent_id ?? null }) }),
 
-  weather: (q:any)=> getJSON('/api/v1/weather', q),
-
-  feed: (q:any)=> getJSON('/api/v1/feed', q),
-  catchById: (id:number)=> getJSON(`/api/v1/catch/${id}`),
-  addCatch: (body:any)=> postJSON('/api/v1/catches', body),
-  catchMarkers: (q:any)=> getJSON('/api/v1/catches/markers', q),
-
-  comment: (id:number, body:any)=> postJSON(`/api/v1/catch/${id}/comments`, body),
-  like: (id:number, body:any)=> postJSON(`/api/v1/catch/${id}/like`, body),
-  follow: (userId:number, body:any)=> postJSON(`/api/v1/follow/${userId}`, body),
-};
+  weather: (lat:number,lng:number, dt?:number) => {
+    const q = new URLSearchParams({ lat:String(lat), lng:String(lng) });
+    if (dt) q.set('dt', String(dt));
+    return req(`/weather?${q.toString()}`);
+  }
+}

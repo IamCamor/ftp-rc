@@ -1,73 +1,123 @@
+import React, { useEffect, useState } from 'react';
+import { api } from '../lib/api';
 
-import React from "react";
-import { api } from "../data/api.extras";
+type SavedLocation = { id:string; name:string; lat:number; lng:number };
+type WX = { temp_c?:number; wind_ms?:number; pressure?:number; source?:string };
 
-type SavedLoc = { id:number; title:string; lat:number; lng:number };
+function loadLocations(): SavedLocation[] {
+  try {
+    const raw = localStorage.getItem('wx_locations');
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch { return []; }
+}
+
+function saveLocations(list: SavedLocation[]) {
+  localStorage.setItem('wx_locations', JSON.stringify(list));
+}
 
 export default function WeatherScreen(){
-  const [items,setItems]=React.useState<SavedLoc[]>([]);
-  const [title,setTitle]=React.useState(""); const [lat,setLat]=React.useState<string>(""); const [lng,setLng]=React.useState<string>("");
-  const [wx,setWx]=React.useState<Record<number, any>>({});
+  const [locations, setLocations] = useState<SavedLocation[]>(loadLocations());
+  const [data, setData] = useState<Record<string, WX>>({});
+  const [name, setName] = useState('');
+  const [coords, setCoords] = useState<{lat?:number; lng?:number}>({});
 
-  const load = async ()=>{
-    const res = await api.getJSON("/weather-locations");
-    const arr:SavedLoc[] = res?.items ?? res ?? [];
-    setItems(arr);
-    // загрузим погоду (fail-open: если 204 — пропустим)
-    const out:Record<number,any> = {};
-    for(const it of arr){
-      try{
-        const w = await api.getJSON(`/weather?lat=${it.lat}&lng=${it.lng}`);
-        if (w) out[it.id]=w;
-      }catch(e){}
-    }
-    setWx(out);
+  useEffect(()=>{
+    (async()=>{
+      const out: Record<string,WX> = {};
+      for (const loc of locations) {
+        try {
+          const j = await api.weather(loc.lat, loc.lng);
+          // Нормализуем (ожидаем from backend { temp_c, wind_ms, pressure, source })
+          out[loc.id] = {
+            temp_c: j?.temp_c ?? j?.main?.temp ?? null,
+            wind_ms: j?.wind_ms ?? j?.wind?.speed ?? null,
+            pressure: j?.pressure ?? j?.main?.pressure ?? null,
+            source: j?.source ?? 'openweather'
+          };
+        } catch(e){
+          out[loc.id] = { temp_c: undefined, wind_ms: undefined, source:'error' };
+        }
+      }
+      setData(out);
+    })();
+  },[locations]);
+
+  const add = ()=>{
+    if (!name || coords.lat==null || coords.lng==null) return;
+    const id = `${Date.now()}`;
+    const next = [...locations, { id, name, lat:coords.lat, lng:coords.lng }];
+    setLocations(next); saveLocations(next);
+    setName(''); setCoords({});
   };
 
-  React.useEffect(()=>{ load(); },[]);
-
-  const add = async ()=>{
-    if(!title || !lat || !lng) return;
-    await api.postJSON("/weather-locations", { title, lat:parseFloat(lat), lng:parseFloat(lng) });
-    setTitle(""); setLat(""); setLng("");
-    await load();
-  };
-  const remove = async (id:number)=>{
-    await api.delete(`/weather-locations/${id}`);
-    await load();
+  const remove = (id:string)=>{
+    const next = locations.filter(l=>l.id!==id);
+    setLocations(next); saveLocations(next);
   };
 
   return (
-    <div className="w-full h-full p-4">
-      <div className="max-w-md mx-auto space-y-4">
-        <div className="backdrop-blur-md bg-white/60 border border-white/40 rounded-2xl p-4 shadow">
-          <div className="text-sm text-gray-600 mb-2">Избранные локации</div>
-          <div className="space-y-3">
-            {items.map(it=>(
-              <div key={it.id} className="flex items-center justify-between">
-                <div>
-                  <div className="font-medium">{it.title}</div>
-                  <div className="text-xs text-gray-500">{it.lat}, {it.lng}</div>
-                </div>
-                <div className="text-sm">
-                  {wx[it.id]?.main ? `${Math.round(wx[it.id].main.temp)}°` : <span className="text-gray-400">—</span>}
-                </div>
-                <button onClick={()=>remove(it.id)} className="text-gray-400 hover:text-red-500">Удалить</button>
-              </div>
-            ))}
-            {items.length===0 && <div className="text-gray-500 text-sm">Сохранённых локаций пока нет</div>}
-          </div>
-        </div>
+    <div className="pt-20 pb-4 px-4 max-w-screen-sm mx-auto">
+      <h1 className="text-xl font-semibold mb-3">Погода</h1>
 
-        <div className="backdrop-blur-md bg-white/60 border border-white/40 rounded-2xl p-4 shadow space-y-2">
-          <div className="text-sm text-gray-600">Добавить локацию</div>
-          <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="Название" className="w-full rounded-xl border px-3 py-2 bg-white/80"/>
-          <div className="flex gap-2">
-            <input value={lat} onChange={e=>setLat(e.target.value)} placeholder="Широта" className="flex-1 rounded-xl border px-3 py-2 bg-white/80"/>
-            <input value={lng} onChange={e=>setLng(e.target.value)} placeholder="Долгота" className="flex-1 rounded-xl border px-3 py-2 bg-white/80"/>
+      <div className="backdrop-blur-xl bg-white/60 border border-white/40 rounded-2xl p-3 mb-4">
+        <div className="grid grid-cols-1 gap-2">
+          <input
+            className="px-3 py-2 rounded-xl border border-gray-200"
+            placeholder="Название локации"
+            value={name} onChange={e=>setName(e.target.value)}
+          />
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              className="px-3 py-2 rounded-xl border border-gray-200"
+              placeholder="Широта (lat)" inputMode="decimal"
+              value={coords.lat ?? ''} onChange={e=>setCoords(s=>({...s,lat:parseFloat(e.target.value)}))}
+            />
+            <input
+              className="px-3 py-2 rounded-xl border border-gray-200"
+              placeholder="Долгота (lng)" inputMode="decimal"
+              value={coords.lng ?? ''} onChange={e=>setCoords(s=>({...s,lng:parseFloat(e.target.value)}))}
+            />
           </div>
-          <button onClick={add} className="w-full rounded-xl bg-pink-600 text-white py-2">Сохранить</button>
+          <button
+            className="px-3 py-2 rounded-xl bg-gradient-to-r from-pink-500 to-fuchsia-600 text-white font-medium"
+            onClick={add}
+          >
+            Добавить локацию
+          </button>
         </div>
+      </div>
+
+      <div className="space-y-3">
+        {locations.map(loc=>{
+          const wx = data[loc.id];
+          return (
+            <div key={loc.id} className="backdrop-blur-xl bg-white/60 border border-white/40 rounded-2xl p-3 flex items-center justify-between">
+              <div>
+                <div className="font-medium">{loc.name}</div>
+                <div className="text-xs text-gray-500">{loc.lat.toFixed(4)}, {loc.lng.toFixed(4)}</div>
+              </div>
+              <div className="text-right">
+                <div className="text-sm">
+                  {wx?.temp_c!=null ? `${Math.round(wx.temp_c)}°C` : '— °C'}
+                </div>
+                <div className="text-xs text-gray-500">
+                  {wx?.wind_ms!=null ? `${wx.wind_ms.toFixed(1)} м/с` : '— м/с'}
+                </div>
+                <div className="text-[10px] text-gray-400">{wx?.source || ''}</div>
+              </div>
+              <button
+                className="ml-3 text-sm text-red-500 hover:text-red-600"
+                onClick={()=>remove(loc.id)}
+                title="Удалить"
+              >✕</button>
+            </div>
+          );
+        })}
+        {locations.length===0 && (
+          <div className="text-center text-gray-500">Добавьте локации, чтобы видеть температуру и ветер</div>
+        )}
       </div>
     </div>
   );

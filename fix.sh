@@ -1,594 +1,452 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="fishtrackpro_ai_patch"
-ZIP="${ROOT}.zip"
+ZIP_NAME="ftp-hotfix-comments-map-weather.zip"
+STAGE=".hotfix_stage_$$"
 
-rm -rf "$ROOT" "$ZIP"
-mkdir -p \
-  "$ROOT/backend/app/Services/Moderation/Providers" \
-  "$ROOT/backend/app/Http/Controllers/Api" \
-  "$ROOT/backend/config" \
-  "$ROOT/backend/sql" \
-  "$ROOT/frontend/src/{api,screens}"
+# Очистка при выходе
+cleanup() { rm -rf "$STAGE"; }
+trap cleanup EXIT
 
-########################################
-# CONFIG: config/moderation.php
-########################################
-cat > "$ROOT/backend/config/moderation.php" <<'PHP'
-<?php
-return [
-    // Драйвер: 'none' | 'heuristic' | 'openai' | 'yandex'
-    'driver' => env('MODERATION_DRIVER', 'heuristic'),
-
-    // Общие лимиты
-    'timeout' => env('MODERATION_TIMEOUT', 6), // сек
-
-    // OpenAI
-    'openai' => [
-        'api_key' => env('OPENAI_API_KEY'),
-        // Для строгой модерации используем специальную модель модерации
-        'model'   => env('OPENAI_MODERATION_MODEL', 'omni-moderation-latest'),
-        'endpoint'=> env('OPENAI_MODERATION_ENDPOINT','https://api.openai.com/v1/moderations'),
-    ],
-
-    // Yandex Cloud / YandexGPT
-    'yandex' => [
-        // OAuth-токен сервисного аккаунта или IAM токен
-        'oauth_token' => env('YC_OAUTH_TOKEN'),
-        'folder_id'   => env('YC_FOLDER_ID'),
-        // Модель для классификации (легкая и недорогая)
-        'model'       => env('YC_MODEL', 'yandexgpt-lite'),
-        // endpoint для v1/completion
-        'endpoint'    => env('YC_ENDPOINT','https://llm.api.cloud.yandex.net/foundationModels/v1/completion'),
-    ],
-];
-PHP
+# ---- Структура архива ----
+mkdir -p "$STAGE/backend/app/Http/Controllers/Api"
+mkdir -p "$STAGE/frontend/src/components"
+mkdir -p "$STAGE/frontend/src/screens"
+mkdir -p "$STAGE/frontend/src/lib"
+mkdir -p "$STAGE/frontend/src"
+mkdir -p "$STAGE/frontend/public"
+mkdir -p "$STAGE/frontend/src/styles"
 
 ########################################
-# SERVICE + PROVIDERS
+# BACKEND: CommentController.php (фикс 422 + гибкие поля)
 ########################################
-cat > "$ROOT/backend/app/Services/Moderation/AiModeration.php" <<'PHP'
+cat > "$STAGE/backend/app/Http/Controllers/Api/CommentController.php" <<'PHP'
 <?php
-namespace App\Services\Moderation;
 
-use App\Services\Moderation\Providers\HeuristicProvider;
-use App\Services\Moderation\Providers\OpenAIProvider;
-use App\Services\Moderation\Providers\YandexGPTProvider;
-
-class AiModeration
-{
-    public static function check(?string $text): array
-    {
-        if (!$text || trim($text)==='') {
-            return ['approved'=>true, 'labels'=>[], 'reason'=>null, 'provider'=>'skip'];
-        }
-
-        $driver = config('moderation.driver','heuristic');
-        $timeout = (int) config('moderation.timeout', 6);
-
-        $provider = match($driver) {
-            'openai'  => new OpenAIProvider(config('moderation.openai'), $timeout),
-            'yandex'  => new YandexGPTProvider(config('moderation.yandex'), $timeout),
-            'none'    => new HeuristicProvider([], $timeout, true),
-            default   => new HeuristicProvider([], $timeout, false),
-        };
-
-        try {
-            $res = $provider->checkText($text);
-            // приведение к единому формату
-            return [
-                'approved' => (bool)($res['approved'] ?? true),
-                'labels'   => $res['labels']   ?? [],
-                'reason'   => $res['reason']   ?? null,
-                'provider' => $res['provider'] ?? $driver,
-                'raw'      => $res['raw']      ?? null,
-            ];
-        } catch (\Throwable $e) {
-            // Если провайдер упал — НЕ блочим, пропускаем
-            return ['approved'=>true,'labels'=>[],'reason'=>'provider_failed','provider'=>$driver];
-        }
-    }
-}
-PHP
-
-cat > "$ROOT/backend/app/Services/Moderation/Providers/HeuristicProvider.php" <<'PHP'
-<?php
-namespace App\Services\Moderation\Providers;
-
-class HeuristicProvider
-{
-    protected bool $alwaysApprove;
-    protected int $timeout;
-    public function __construct(array $cfg=[], int $timeout=6, bool $alwaysApprove=false)
-    {
-        $this->timeout = $timeout;
-        $this->alwaysApprove = $alwaysApprove;
-    }
-
-    public function checkText(string $text): array
-    {
-        if ($this->alwaysApprove) {
-            return ['approved'=>true, 'labels'=>[], 'reason'=>'disabled', 'provider'=>'heuristic'];
-        }
-        $bad = (bool) preg_match('/\b(спам|оскорб|мат|ненависть|суицид|наркот|расизм|фашизм)\b/iu', $text);
-        return [
-            'approved'=> !$bad,
-            'labels'  => $bad ? ['toxic'] : [],
-            'reason'  => $bad ? 'heuristic_badword' : 'ok',
-            'provider'=> 'heuristic',
-        ];
-    }
-}
-PHP
-
-cat > "$ROOT/backend/app/Services/Moderation/Providers/OpenAIProvider.php" <<'PHP'
-<?php
-namespace App\Services\Moderation\Providers;
-
-use GuzzleHttp\Client;
-
-class OpenAIProvider
-{
-    protected array $cfg;
-    protected int $timeout;
-    public function __construct(array $cfg, int $timeout=6)
-    {
-        $this->cfg = $cfg;
-        $this->timeout = $timeout;
-    }
-
-    public function checkText(string $text): array
-    {
-        if (empty($this->cfg['api_key'])) {
-            throw new \RuntimeException('OPENAI_API_KEY missing');
-        }
-        $client = new Client([
-            'timeout' => $this->timeout,
-        ]);
-
-        $resp = $client->post($this->cfg['endpoint'] ?? 'https://api.openai.com/v1/moderations', [
-            'headers' => [
-                'Authorization' => 'Bearer '.$this->cfg['api_key'],
-                'Content-Type'  => 'application/json',
-            ],
-            'json' => [
-                'model' => $this->cfg['model'] ?? 'omni-moderation-latest',
-                'input' => $text,
-            ],
-        ]);
-
-        $json = json_decode((string)$resp->getBody(), true);
-        // Формат OpenAI moderation: categories + flagged
-        $result = $json['results'][0] ?? [];
-        $flagged = (bool)($result['flagged'] ?? false);
-        $labels = [];
-        if (!empty($result['categories'])) {
-            foreach ($result['categories'] as $k=>$v) {
-                if ($v) $labels[] = $k;
-            }
-        }
-        return [
-            'approved'=> !$flagged,
-            'labels'  => $labels,
-            'reason'  => $flagged ? 'openai_flagged' : 'openai_ok',
-            'provider'=> 'openai',
-            'raw'     => $json,
-        ];
-    }
-}
-PHP
-
-cat > "$ROOT/backend/app/Services/Moderation/Providers/YandexGPTProvider.php" <<'PHP'
-<?php
-namespace App\Services\Moderation\Providers;
-
-use GuzzleHttp\Client;
-
-/**
- * Простой prompt-классификатор через YandexGPT.
- * Возвращает JSON с approved/labels. Если парсинг не удался — разрешаем (fail-open).
- */
-class YandexGPTProvider
-{
-    protected array $cfg;
-    protected int $timeout;
-    public function __construct(array $cfg, int $timeout=6)
-    {
-        $this->cfg = $cfg;
-        $this->timeout = $timeout;
-    }
-
-    public function checkText(string $text): array
-    {
-        if (empty($this->cfg['oauth_token']) || empty($this->cfg['folder_id'])) {
-            throw new \RuntimeException('YC_OAUTH_TOKEN or YC_FOLDER_ID missing');
-        }
-
-        $prompt = <<<EOT
-Ты — фильтр модерации. Классифицируй текст пользователя. Ответь строго JSON без пояснений:
-{"approved":true|false,"labels":["..."],"reason":"кратко"}
-
-Правила отклонения: оскорбления/ненависть/расизм/насилие/суицид/наркотики/спам/NSFW.
-Текст: <<<{$text}>>>
-EOT;
-
-        $client = new Client(['timeout'=>$this->timeout]);
-        $resp = $client->post($this->cfg['endpoint'] ?? 'https://llm.api.cloud.yandex.net/foundationModels/v1/completion', [
-            'headers' => [
-                'Authorization' => 'Bearer '.$this->cfg['oauth_token'],
-                'x-folder-id'   => $this->cfg['folder_id'],
-                'Content-Type'  => 'application/json',
-            ],
-            'json' => [
-                'model' => ($this->cfg['model'] ?? 'yandexgpt-lite').'/latest',
-                'completionOptions' => [
-                    'stream' => false,
-                    'temperature' => 0.0,
-                    'maxTokens' => 256
-                ],
-                'messages' => [
-                    ['role'=>'system','text'=>'Ты помощник модерации. Отвечай строго JSON.'],
-                    ['role'=>'user','text'=>$prompt],
-                ],
-            ],
-        ]);
-
-        $json = json_decode((string)$resp->getBody(), true);
-        $textOut = $json['result']['alternatives'][0]['message']['text'] ?? '';
-        // Попробуем распарсить JSON из ответа
-        $parsed = null;
-        if ($textOut) {
-            $textOut = trim($textOut);
-            // на случай, если модель добавила пояснения
-            $start = strpos($textOut, '{');
-            $end   = strrpos($textOut, '}');
-            if ($start!==false && $end!==false && $end>$start) {
-                $maybe = substr($textOut, $start, $end-$start+1);
-                $parsed = json_decode($maybe, true);
-            }
-        }
-
-        if (is_array($parsed) && isset($parsed['approved'])) {
-            return [
-                'approved'=> (bool)$parsed['approved'],
-                'labels'  => array_values((array)($parsed['labels'] ?? [])),
-                'reason'  => $parsed['reason'] ?? 'yandex_ok',
-                'provider'=> 'yandex',
-                'raw'     => $json,
-            ];
-        }
-
-        // fail-open
-        return [
-            'approved'=> true,
-            'labels'  => [],
-            'reason'  => 'yandex_parse_fallback',
-            'provider'=> 'yandex',
-            'raw'     => $json,
-        ];
-    }
-}
-PHP
-
-########################################
-# API ДОПОЛНЕНИЯ (как раньше): репорты/погода/лидерборды
-########################################
-cat > "$ROOT/backend/app/Http/Controllers/Api/WeatherLocationsController.php" <<'PHP'
-<?php
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
-class WeatherLocationsController extends Controller
+class CommentController extends Controller
 {
-    public function index(Request $r) {
-        $uid = auth()->id();
-        $rows = DB::table('user_weather_locations')
-            ->where(function($q) use ($uid){ $q->where('user_id', $uid ?? 0); })
-            ->orderBy('pos')->orderBy('id')->get();
-        return response()->json(['items'=>$rows]);
-    }
-    public function store(Request $r) {
-        $uid = auth()->id() ?? 0;
-        $data = $r->validate([
-            'name'=>'required|string|min:2',
-            'lat'=>'required|numeric',
-            'lng'=>'required|numeric',
-            'pos'=>'nullable|integer',
-        ]);
-        $id = DB::table('user_weather_locations')->insertGetId(array_merge($data,[
-            'user_id'=>$uid, 'created_at'=>now(),'updated_at'=>now()
-        ]));
-        return response()->json(['id'=>$id],201);
-    }
-    public function destroy($id) {
-        $uid = auth()->id() ?? 0;
-        DB::table('user_weather_locations')->where('id',$id)->where('user_id',$uid)->delete();
-        return response()->json(['ok'=>true]);
-    }
-}
-PHP
+    public function store(Request $r, $catchId)
+    {
+        // Принимаем text | comment | body | message
+        $raw = $r->input('text', $r->input('comment', $r->input('body', $r->input('message', null))));
+        $text = is_string($raw) ? trim($raw) : '';
 
-cat > "$ROOT/backend/app/Http/Controllers/Api/LeaderboardController.php" <<'PHP'
-<?php
-namespace App\Http\Controllers\Api;
-
-use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
-
-class LeaderboardController extends Controller
-{
-    public function index(Request $r) {
-        $period = $r->query('period','weekly');
-        [$from,$to] = match($period){
-            'daily'   => [now()->startOfDay(),   now()->endOfDay()],
-            'monthly' => [now()->startOfMonth(), now()->endOfMonth()],
-            default   => [now()->startOfWeek(),  now()->endOfWeek()],
-        };
-        $metric = $r->query('metric','likes');
-
-        if ($metric==='catches') {
-            $rows = DB::table('catch_records as cr')
-                ->selectRaw('cr.user_id, u.name, COALESCE(u.photo_url,"") as avatar, COUNT(*) as value')
-                ->leftJoin('users as u','u.id','=','cr.user_id')
-                ->whereBetween('cr.created_at',[$from,$to])
-                ->where('cr.privacy','!=','private')
-                ->groupBy('cr.user_id','u.name','u.photo_url')
-                ->orderByDesc('value')->limit(100)->get();
-        } else {
-            $rows = DB::table('catch_likes as cl')
-                ->selectRaw('cr.user_id, u.name, COALESCE(u.photo_url,"") as avatar, COUNT(*) as value')
-                ->join('catch_records as cr','cr.id','=','cl.catch_id')
-                ->leftJoin('users as u','u.id','=','cr.user_id')
-                ->whereBetween('cl.created_at',[$from,$to])
-                ->where('cr.privacy','!=','private')
-                ->groupBy('cr.user_id','u.name','u.photo_url')
-                ->orderByDesc('value')->limit(100)->get();
+        if ($text === '') {
+            return response()->json([
+                'message' => 'Validation error',
+                'errors' => ['text' => ['Поле комментария обязательно']],
+            ], 422);
         }
-        return response()->json(['period'=>$period,'metric'=>$metric,'items'=>$rows]);
+
+        $userId = optional($r->user())->id;
+        $parentId = $r->integer('parent_id');
+        $now = now();
+
+        // Набор полей к insert — минимально совместимый
+        $insert = [
+            'catch_id'   => (int)$catchId,
+            'user_id'    => $userId,
+            'parent_id'  => $parentId ?: null,
+            'text'       => $text,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ];
+
+        // Если есть колонка is_approved — одобряем сразу
+        if (Schema::hasColumn('catch_comments', 'is_approved')) {
+            $insert['is_approved'] = 1;
+        }
+
+        // Опционально поддержим author_name, если колонка существует
+        if (!$userId && Schema::hasColumn('catch_comments', 'author_name')) {
+            $guest = trim((string)$r->input('guest_name', ''));
+            $insert['author_name'] = $guest !== '' ? $guest : null;
+        }
+
+        $id = DB::table('catch_comments')->insertGetId($insert);
+
+        // Вернём карточку комментария с именем и аватаром (если есть)
+        $select = "
+            cc.id, cc.catch_id, cc.parent_id, cc.text, cc.created_at
+        ";
+        if (Schema::hasColumn('catch_comments','is_approved')) {
+            $select .= ", cc.is_approved";
+        }
+
+        $avatarExpr = "COALESCE(u.avatar_url, u.photo_url, '')";
+        $nameExpr   = "COALESCE(u.name, 'Гость')";
+        if (Schema::hasColumn('catch_comments','author_name')) {
+            $nameExpr = "COALESCE(u.name, cc.author_name, 'Гость')";
+        }
+
+        $item = DB::table('catch_comments as cc')
+            ->leftJoin('users as u','u.id','=','cc.user_id')
+            ->selectRaw($select . ",
+                $nameExpr as author_name,
+                $avatarExpr as author_avatar
+            ")
+            ->where('cc.id', $id)
+            ->first();
+
+        return response()->json(['item' => $item], 201);
     }
 }
 PHP
 
-cat > "$ROOT/backend/app/Http/Controllers/Api/ReportController.php" <<'PHP'
-<?php
-namespace App\Http\Controllers\Api;
-
-use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
-
-class ReportController extends Controller
-{
-    public function store(Request $r) {
-        $data = $r->validate([
-            'target_type'=>'required|in:catch,comment,user,point',
-            'target_id'  =>'required|integer',
-            'reason'     =>'nullable|string|max:2000',
-        ]);
-        $id = DB::table('reports')->insertGetId([
-            'user_id'     => auth()->id(),
-            'target_type' => $data['target_type'],
-            'target_id'   => $data['target_id'],
-            'reason'      => $data['reason'] ?? null,
-            'status'      => 'new',
-            'created_at'  => now(),
-            'updated_at'  => now(),
-        ]);
-        return response()->json(['id'=>$id],201);
-    }
-}
-PHP
-
 ########################################
-# SQL (как и раньше, без миграций)
+# FRONTEND: api.ts — функции points/feed/weather + комменты
 ########################################
-cat > "$ROOT/backend/sql/patch_ai_weather_leaderboard.sql" <<'SQL'
--- Сохранённых локаций для погоды может не быть
-CREATE TABLE IF NOT EXISTS user_weather_locations (
-  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  user_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
-  name VARCHAR(255) NOT NULL,
-  lat DOUBLE NOT NULL,
-  lng DOUBLE NOT NULL,
-  pos INT NOT NULL DEFAULT 0,
-  created_at TIMESTAMP NULL,
-  updated_at TIMESTAMP NULL,
-  INDEX (user_id)
-);
+cat > "$STAGE/frontend/src/lib/api.ts" <<'TS'
+export const API_BASE = (window as any).__API__ || 'https://api.fishtrackpro.ru/api/v1';
 
--- Жалобы
-CREATE TABLE IF NOT EXISTS reports (
-  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  user_id BIGINT UNSIGNED NULL,
-  target_type VARCHAR(32) NOT NULL,
-  target_id BIGINT UNSIGNED NOT NULL,
-  reason TEXT NULL,
-  status VARCHAR(16) NOT NULL DEFAULT 'new',
-  created_at TIMESTAMP NULL,
-  updated_at TIMESTAMP NULL,
-  INDEX(target_type, target_id)
-);
-
--- Флаг модерации для комментариев, если нет
-ALTER TABLE catch_comments
-  ADD COLUMN IF NOT EXISTS is_approved TINYINT(1) NOT NULL DEFAULT 1;
-SQL
-
-########################################
-# FRONT: helper для репортов/погоды/лидера
-########################################
-cat > "$ROOT/frontend/src/api/extra.ts" <<'TS'
-export const API = (window as any).__API_BASE__ || "https://api.fishtrackpro.ru/api";
-
-async function _req(method: string, url: string, body?: any) {
-  const init: RequestInit = {
-    method, credentials: "include",
-    headers: {"Content-Type":"application/json"}
-  };
-  if (body) init.body = JSON.stringify(body);
-  const res = await fetch(url, init);
-  if (!res.ok) throw new Error(`${method} ${url} -> ${res.status}`);
-  return res.json();
+async function req(path: string, init?: RequestInit) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' , ...(init?.headers||{}) },
+    ...init
+  });
+  if (!res.ok) {
+    let p = null; try { p = await res.text(); } catch {}
+    console.error('HTTP', res.status, path, p);
+    throw new Error(String(res.status));
+  }
+  const ct = res.headers.get('content-type')||'';
+  return ct.includes('application/json') ? res.json() : res.text();
 }
 
-export const listWeatherLocations = () => _req('GET', `${API}/v1/weather/locations`);
-export const addWeatherLocation    = (data:any) => _req('POST', `${API}/v1/weather/locations`, data);
-export const removeWeatherLocation = (id:number) => _req('DELETE', `${API}/v1/weather/locations/${id}`);
+export const api = {
+  points: (params: {limit?:number; filter?:string; bbox?: string}) => {
+    const q = new URLSearchParams();
+    if (params.limit) q.set('limit', String(params.limit));
+    if (params.filter) q.set('filter', params.filter);
+    if (params.bbox) q.set('bbox', params.bbox);
+    return req(`/map/points?${q.toString()}`);
+  },
+  feed: (params: {limit?:number; offset?:number}) => {
+    const q = new URLSearchParams();
+    if (params.limit!=null) q.set('limit', String(params.limit));
+    if (params.offset!=null) q.set('offset', String(params.offset));
+    return req(`/feed?${q.toString()}`);
+  },
+  catchById: (id:number) => req(`/catch/${id}`),
+  addComment: (id:number, text:string, parent_id?:number|null) =>
+    req(`/catch/${id}/comments`, { method:'POST', body: JSON.stringify({ text, parent_id: parent_id ?? null }) }),
 
-export const getWeather = (lat:number, lng:number, dt?:number) =>
-  _req('GET', `${API}/v1/weather?lat=${lat}&lng=${lng}${dt?`&dt=${dt}`:''}`);
-
-export const getLeaderboard = (period:'daily'|'weekly'|'monthly'='weekly', metric:'likes'|'catches'='likes') =>
-  _req('GET', `${API}/v1/leaderboard?period=${period}&metric=${metric}`);
-
-export const sendReport = (target_type:'catch'|'comment'|'user'|'point', target_id:number, reason?:string) =>
-  _req('POST', `${API}/v1/report`, { target_type, target_id, reason });
+  weather: (lat:number,lng:number, dt?:number) => {
+    const q = new URLSearchParams({ lat:String(lat), lng:String(lng) });
+    if (dt) q.set('dt', String(dt));
+    return req(`/weather?${q.toString()}`);
+  }
+}
 TS
 
 ########################################
-# FRONT: Weather / Leaderboard (экраны)
+# FRONTEND: Реальная карта (MapView.tsx) на react-leaflet
 ########################################
-cat > "$ROOT/frontend/src/screens/WeatherPage.tsx" <<'TSX'
-import React, { useEffect, useState } from "react";
-import { listWeatherLocations, addWeatherLocation, removeWeatherLocation, getWeather } from "../api/extra";
+cat > "$STAGE/frontend/src/components/MapView.tsx" <<'TSX'
+import React, { useEffect } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
 
-type Loc = { id:number; name:string; lat:number; lng:number; pos:number };
+// фиксим иконки leaflet (без webpack loaders)
+const icon = new L.Icon({
+  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+  shadowSize: [41, 41],
+  shadowAnchor: [12, 41],
+});
 
-export default function WeatherPage(){
-  const [items, setItems] = useState<Loc[]>([]);
-  const [form, setForm] = useState({ name:"", lat:"", lng:"" });
-  const [adding, setAdding] = useState(false);
-  const [wx, setWx] = useState<Record<number, any>>({});
+function FitBounds({ bbox }: { bbox?: [number,number,number,number] }) {
+  const map = useMap();
+  useEffect(()=>{
+    if (!bbox) return;
+    const [[minLat,minLng],[maxLat,maxLng]] = [[bbox[1],bbox[0]],[bbox[3],bbox[2]]];
+    map.fitBounds([[minLat,minLng],[maxLat,maxLng]], { padding:[24,24] });
+  },[bbox]);
+  return null;
+}
 
-  useEffect(()=>{ (async ()=>{
-    try {
-      const r = await listWeatherLocations();
-      const arr:Loc[] = r.items || [];
-      setItems(arr);
-      for (const it of arr) {
-        const w = await getWeather(it.lat,it.lng).catch(()=>null);
-        if (w) setWx(s=>({...s,[it.id]:w}));
+type Point = {
+  id:number; title:string; lat:number; lng:number; category?:string;
+};
+export default function MapView({
+  points, center=[55.751244,37.618423], zoom=11, bbox
+}:{ points:Point[]; center?:[number,number]; zoom?:number; bbox?:[number,number,number,number]}) {
+  return (
+    <div className="relative w-full h-full">
+      <MapContainer
+        center={center}
+        zoom={zoom}
+        className="w-full h-full rounded-2xl overflow-hidden"
+        zoomControl={false}
+      >
+        <TileLayer
+          attribution='&copy; CARTO & OpenStreetMap'
+          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+        />
+        {points.map(p=>(
+          <Marker key={p.id} position={[p.lat, p.lng]} icon={icon}>
+            <Popup>
+              <div className="text-sm">
+                <div className="font-semibold">{p.title || 'Точка'}</div>
+                {p.category && <div className="text-xs text-gray-500 mt-1">Категория: {p.category}</div>}
+              </div>
+            </Popup>
+          </Marker>
+        ))}
+        <FitBounds bbox={bbox}/>
+      </MapContainer>
+    </div>
+  );
+}
+TSX
+
+########################################
+# FRONTEND: Шапка с кликом на "Погода"
+########################################
+cat > "$STAGE/frontend/src/components/Header.tsx" <<'TSX'
+import React from 'react';
+
+export default function Header({ onLogoClick }:{ onLogoClick?:()=>void }) {
+  return (
+    <div className="fixed top-0 left-0 right-0 z-40">
+      <div className="mx-auto max-w-screen-sm px-4 pt-3">
+        <div className="backdrop-blur-xl bg-white/60 border border-white/40 rounded-2xl shadow-sm px-3 py-2 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <button onClick={onLogoClick} className="font-semibold text-gray-900">FishTrack Pro</button>
+            <span className="text-xs px-2 py-1 rounded-full bg-gradient-to-r from-pink-400 to-fuchsia-500 text-white">beta</span>
+          </div>
+          <div className="flex items-center gap-4">
+            <button
+              className="text-sm text-gray-700 hover:text-gray-900"
+              onClick={() => { window.location.hash = '#/weather'; }}
+              aria-label="Открыть погоду"
+              title="Погода"
+            >
+              ☁️ Погода
+            </button>
+            <button
+              className="text-sm text-gray-700 hover:text-gray-900"
+              onClick={() => { window.location.hash = '#/alerts'; }}
+              aria-label="Уведомления"
+              title="Уведомления"
+            >
+              🔔
+            </button>
+            <button
+              className="text-sm text-gray-700 hover:text-gray-900"
+              onClick={() => { window.location.hash = '#/profile'; }}
+              aria-label="Профиль"
+              title="Профиль"
+            >
+              🧑‍✈️
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+TSX
+
+########################################
+# FRONTEND: WeatherScreen.tsx — вывод температуры/ветра
+########################################
+cat > "$STAGE/frontend/src/screens/WeatherScreen.tsx" <<'TSX'
+import React, { useEffect, useState } from 'react';
+import { api } from '../lib/api';
+
+type SavedLocation = { id:string; name:string; lat:number; lng:number };
+type WX = { temp_c?:number; wind_ms?:number; pressure?:number; source?:string };
+
+function loadLocations(): SavedLocation[] {
+  try {
+    const raw = localStorage.getItem('wx_locations');
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch { return []; }
+}
+
+function saveLocations(list: SavedLocation[]) {
+  localStorage.setItem('wx_locations', JSON.stringify(list));
+}
+
+export default function WeatherScreen(){
+  const [locations, setLocations] = useState<SavedLocation[]>(loadLocations());
+  const [data, setData] = useState<Record<string, WX>>({});
+  const [name, setName] = useState('');
+  const [coords, setCoords] = useState<{lat?:number; lng?:number}>({});
+
+  useEffect(()=>{
+    (async()=>{
+      const out: Record<string,WX> = {};
+      for (const loc of locations) {
+        try {
+          const j = await api.weather(loc.lat, loc.lng);
+          // Нормализуем (ожидаем from backend { temp_c, wind_ms, pressure, source })
+          out[loc.id] = {
+            temp_c: j?.temp_c ?? j?.main?.temp ?? null,
+            wind_ms: j?.wind_ms ?? j?.wind?.speed ?? null,
+            pressure: j?.pressure ?? j?.main?.pressure ?? null,
+            source: j?.source ?? 'openweather'
+          };
+        } catch(e){
+          out[loc.id] = { temp_c: undefined, wind_ms: undefined, source:'error' };
+        }
       }
-    } catch(e){}
-  })(); }, []);
+      setData(out);
+    })();
+  },[locations]);
 
-  const onAdd = async (e:React.FormEvent)=> {
-    e.preventDefault();
-    const lat = parseFloat(form.lat); const lng = parseFloat(form.lng);
-    if (!form.name || Number.isNaN(lat) || Number.isNaN(lng)) return;
-    const r = await addWeatherLocation({name:form.name, lat, lng});
-    const id = r.id;
-    const w = await getWeather(lat,lng).catch(()=>null);
-    setItems(s=>[...s, {id, name:form.name, lat, lng, pos:0}]);
-    if (w) setWx(s=>({...s,[id]:w}));
-    setForm({name:"",lat:"",lng:""}); setAdding(false);
+  const add = ()=>{
+    if (!name || coords.lat==null || coords.lng==null) return;
+    const id = `${Date.now()}`;
+    const next = [...locations, { id, name, lat:coords.lat, lng:coords.lng }];
+    setLocations(next); saveLocations(next);
+    setName(''); setCoords({});
   };
 
-  const onDelete = async (id:number)=>{
-    await removeWeatherLocation(id);
-    setItems(s=>s.filter(i=>i.id!==id));
+  const remove = (id:string)=>{
+    const next = locations.filter(l=>l.id!==id);
+    setLocations(next); saveLocations(next);
   };
 
   return (
-    <div className="p-4 space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Погода</h1>
-        <button onClick={()=>setAdding(true)} className="px-3 py-2 rounded-xl bg-white/60 backdrop-blur border">+ Локация</button>
+    <div className="pt-20 pb-4 px-4 max-w-screen-sm mx-auto">
+      <h1 className="text-xl font-semibold mb-3">Погода</h1>
+
+      <div className="backdrop-blur-xl bg-white/60 border border-white/40 rounded-2xl p-3 mb-4">
+        <div className="grid grid-cols-1 gap-2">
+          <input
+            className="px-3 py-2 rounded-xl border border-gray-200"
+            placeholder="Название локации"
+            value={name} onChange={e=>setName(e.target.value)}
+          />
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              className="px-3 py-2 rounded-xl border border-gray-200"
+              placeholder="Широта (lat)" inputMode="decimal"
+              value={coords.lat ?? ''} onChange={e=>setCoords(s=>({...s,lat:parseFloat(e.target.value)}))}
+            />
+            <input
+              className="px-3 py-2 rounded-xl border border-gray-200"
+              placeholder="Долгота (lng)" inputMode="decimal"
+              value={coords.lng ?? ''} onChange={e=>setCoords(s=>({...s,lng:parseFloat(e.target.value)}))}
+            />
+          </div>
+          <button
+            className="px-3 py-2 rounded-xl bg-gradient-to-r from-pink-500 to-fuchsia-600 text-white font-medium"
+            onClick={add}
+          >
+            Добавить локацию
+          </button>
+        </div>
       </div>
 
-      {adding && (
-        <form onSubmit={onAdd} className="grid gap-2 p-3 rounded-2xl bg-white/60 backdrop-blur border">
-          <input className="px-3 py-2 rounded-xl border" placeholder="Название" value={form.name} onChange={e=>setForm({...form, name:e.target.value})}/>
-          <div className="grid grid-cols-2 gap-2">
-            <input className="px-3 py-2 rounded-xl border" placeholder="Широта" value={form.lat} onChange={e=>setForm({...form, lat:e.target.value})}/>
-            <input className="px-3 py-2 rounded-xl border" placeholder="Долгота" value={form.lng} onChange={e=>setForm({...form, lng:e.target.value})}/>
-          </div>
-          <div className="flex gap-2">
-            <button className="px-3 py-2 rounded-xl bg-blue-500 text-white">Сохранить</button>
-            <button type="button" onClick={()=>setAdding(false)} className="px-3 py-2 rounded-xl">Отмена</button>
-          </div>
-        </form>
-      )}
-
       <div className="space-y-3">
-        {items.map(it=>{
-          const w = wx[it.id];
-          const temp = w?.ok ? (w.current?.temp ?? w.hourly?.[0]?.temp) : null;
-          const wind = w?.ok ? (w.current?.wind_speed ?? w.hourly?.[0]?.wind_speed) : null;
+        {locations.map(loc=>{
+          const wx = data[loc.id];
           return (
-            <div key={it.id} className="p-4 rounded-2xl bg-white/60 backdrop-blur border flex items-center justify-between">
+            <div key={loc.id} className="backdrop-blur-xl bg-white/60 border border-white/40 rounded-2xl p-3 flex items-center justify-between">
               <div>
-                <div className="font-medium">{it.name}</div>
-                <div className="text-sm text-gray-600">{it.lat.toFixed(3)}, {it.lng.toFixed(3)}</div>
-                <div className="text-sm mt-1">{temp!=null ? `Темп: ${Math.round(temp)}°C` : 'Нет данных'}{wind!=null ? ` · Ветер: ${Math.round(wind)} м/с` : ''}</div>
+                <div className="font-medium">{loc.name}</div>
+                <div className="text-xs text-gray-500">{loc.lat.toFixed(4)}, {loc.lng.toFixed(4)}</div>
               </div>
-              <button onClick={()=>onDelete(it.id)} className="px-3 py-2 rounded-xl border">Удалить</button>
+              <div className="text-right">
+                <div className="text-sm">
+                  {wx?.temp_c!=null ? `${Math.round(wx.temp_c)}°C` : '— °C'}
+                </div>
+                <div className="text-xs text-gray-500">
+                  {wx?.wind_ms!=null ? `${wx.wind_ms.toFixed(1)} м/с` : '— м/с'}
+                </div>
+                <div className="text-[10px] text-gray-400">{wx?.source || ''}</div>
+              </div>
+              <button
+                className="ml-3 text-sm text-red-500 hover:text-red-600"
+                onClick={()=>remove(loc.id)}
+                title="Удалить"
+              >✕</button>
             </div>
           );
         })}
-        {!items.length && <div className="text-center text-gray-500">Нет сохранённых локаций</div>}
+        {locations.length===0 && (
+          <div className="text-center text-gray-500">Добавьте локации, чтобы видеть температуру и ветер</div>
+        )}
       </div>
     </div>
   );
 }
 TSX
 
-cat > "$ROOT/frontend/src/screens/LeaderboardPage.tsx" <<'TSX'
-import React, { useEffect, useState } from "react";
-import { getLeaderboard } from "../api/extra";
+########################################
+# FRONTEND: MapScreen.tsx (встраиваем реальную карту)
+########################################
+cat > "$STAGE/frontend/src/screens/MapScreen.tsx" <<'TSX'
+import React, { useEffect, useMemo, useState } from 'react';
+import { api } from '../lib/api';
+import MapView from '../components/MapView';
 
-type Period = 'daily'|'weekly'|'monthly';
-type Metric = 'likes'|'catches';
+type Point = { id:number; title:string; lat:number; lng:number; category?:string; };
 
-export default function LeaderboardPage(){
-  const [period,setPeriod] = useState<Period>('weekly');
-  const [metric,setMetric] = useState<Metric>('likes');
-  const [items,setItems] = useState<any[]>([]);
-  const [loading,setLoading] = useState(true);
+export default function MapScreen(){
+  const [points, setPoints] = useState<Point[]>([]);
+  const [bbox, setBbox] = useState<[number,number,number,number] | undefined>(undefined);
+  const [filter, setFilter] = useState<string|undefined>(undefined);
 
-  useEffect(()=>{ (async ()=>{
-    setLoading(true);
-    try{
-      const r = await getLeaderboard(period,metric);
-      setItems(r.items||[]);
-    }catch(e){}
-    setLoading(false);
-  })(); }, [period,metric]);
+  useEffect(()=>{
+    // Пример bbox для Москвы (если нет гео)
+    const fallbackBbox:[number,number,number,number] = [37.2,55.5,37.9,55.95];
+    const load = async ()=>{
+      const params:any = { limit: 500, bbox: (bbox||fallbackBbox).join(',') };
+      if (filter) params.filter = filter;
+      const j = await api.points(params);
+      setPoints(j.items || []);
+    };
+    load().catch(console.error);
+  },[bbox, filter]);
+
+  // UI для фильтров (минимально)
+  const filters = useMemo(()=>[
+    {key:undefined, title:'Все'},
+    {key:'spot', title:'Споты'},
+    {key:'shop', title:'Магазины'},
+    {key:'slip', title:'Слипы'},
+    {key:'camp', title:'Кемпинги'},
+    {key:'catch', title:'Уловы'},
+  ],[]);
 
   return (
-    <div className="p-4 space-y-3">
-      <h1 className="text-xl font-semibold">Рейтинг</h1>
-      <div className="flex gap-2 items-center">
-        {(['daily','weekly','monthly'] as Period[]).map(p=>{
-          const active = p===period;
-          return <button key={p} onClick={()=>setPeriod(p)} className={`px-3 py-2 rounded-xl border ${active?'bg-blue-500 text-white':'bg-white/60 backdrop-blur'}`}>{p==='daily'?'день':p==='weekly'?'неделя':'месяц'}</button>;
-        })}
-        <div className="flex-1" />
-        {(['likes','catches'] as Metric[]).map(m=>{
-          const active = m===metric;
-          return <button key={m} onClick={()=>setMetric(m)} className={`px-3 py-2 rounded-xl border ${active?'bg-blue-500 text-white':'bg-white/60 backdrop-blur'}`}>{m==='likes'?'лайки':'уловы'}</button>;
-        })}
+    <div className="w-full h-full pt-16 pb-16">
+      <div className="absolute top-16 left-0 right-0 z-30 px-4">
+        <div className="overflow-x-auto no-scrollbar">
+          <div className="inline-flex gap-2 backdrop-blur-xl bg-white/60 border border-white/40 rounded-2xl p-2">
+            {filters.map(f=>(
+              <button
+                key={String(f.key)}
+                onClick={()=>setFilter(f.key as any)}
+                className={`px-3 py-1 rounded-xl text-sm ${filter===f.key ? 'bg-gradient-to-r from-pink-500 to-fuchsia-600 text-white' : 'bg-white/70 text-gray-800 border border-white/60'}`}
+              >
+                {f.title}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
-      {loading && <div className="text-gray-500">Загрузка…</div>}
-      {!loading && !items.length && <div className="text-gray-500">Пусто</div>}
-
-      <div className="space-y-2">
-        {items.map((it,idx)=>(
-          <div key={idx} className="p-3 rounded-2xl bg-white/60 backdrop-blur border flex items-center gap-3">
-            <img src={it.avatar||''} onError={(e:any)=>e.currentTarget.style.display='none'} className="w-10 h-10 rounded-full object-cover"/>
-            <div className="flex-1">
-              <div className="font-medium">{it.name||'—'}</div>
-              <div className="text-sm text-gray-600">Баллы: {it.value}</div>
-            </div>
-            <a href={`#/profile/${it.user_id}`} className="px-3 py-2 rounded-xl border">Профиль</a>
-          </div>
-        ))}
+      <div className="absolute inset-0 top-16 bottom-16 z-10">
+        <MapView points={points} bbox={bbox}/>
       </div>
     </div>
   );
@@ -596,38 +454,95 @@ export default function LeaderboardPage(){
 TSX
 
 ########################################
-# README
+# FRONTEND: Простой App header + маршрутизация по hash
 ########################################
-cat > "$ROOT/README.md" <<'MD'
-# FishTrackPro — AI Moderation Patch (OpenAI + YandexGPT) + Weather locations + Leaderboard + Reports
+cat > "$STAGE/frontend/src/App.tsx" <<'TSX'
+import React, { useEffect, useState } from 'react';
+import Header from './components/Header';
+import MapScreen from './screens/MapScreen';
+import WeatherScreen from './screens/WeatherScreen';
 
-Архив содержит **готовые файлы**, ничего не перезаписывает автоматически. Вы сами копируете их в проект.
+function useHash(): string {
+  const [h,setH]=useState(window.location.hash||'#/map');
+  useEffect(()=>{
+    const on = ()=>setH(window.location.hash||'#/map');
+    window.addEventListener('hashchange',on);
+    return ()=>window.removeEventListener('hashchange',on);
+  },[]);
+  return h;
+}
 
-## Что внутри
+export default function App(){
+  const hash = useHash();
+  const route = hash.replace(/^#\//,'') || 'map';
 
-### Backend
-- `config/moderation.php` — единый конфиг AI-модерации:
-  - `MODERATION_DRIVER=none|heuristic|openai|yandex`
-  - OpenAI: `OPENAI_API_KEY`, `OPENAI_MODERATION_MODEL` (по умолчанию `omni-moderation-latest`)
-  - YandexGPT: `YC_OAUTH_TOKEN`, `YC_FOLDER_ID`, `YC_MODEL` (`yandexgpt-lite` по умолчанию), `YC_ENDPOINT`
-- `app/Services/Moderation/*` — сервис `AiModeration` и провайдеры:
-  - `OpenAIProvider` — POST `/v1/moderations`
-  - `YandexGPTProvider` — `/foundationModels/v1/completion` с JSON-ответом
-  - `HeuristicProvider` — простая эвристика/заглушка
-- Контроллеры: `WeatherLocationsController`, `LeaderboardController`, `ReportController`
-- SQL: `backend/sql/patch_ai_weather_leaderboard.sql` (без миграций)
+  return (
+    <div className="w-full h-screen relative bg-gray-50">
+      <Header />
+      {route==='map' && <MapScreen/>}
+      {route==='weather' && <WeatherScreen/>}
+      {route!=='map' && route!=='weather' && (
+        <div className="pt-20 px-4 text-gray-500">Страница в разработке</div>
+      )}
+    </div>
+  );
+}
+TSX
 
-**Подключение роутов** (внутрь вашей группы `/api/v1`, ничего не удаляя):
-```php
-use App\Http\Controllers\Api\WeatherLocationsController;
-use App\Http\Controllers\Api\LeaderboardController;
-use App\Http\Controllers\Api\ReportController;
+########################################
+# FRONTEND: Глобальные стили (фикс z-index карты)
+########################################
+cat > "$STAGE/frontend/src/styles/global.css" <<'CSS'
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-Route::get('/weather/locations', [WeatherLocationsController::class,'index']);
-Route::middleware('auth:sanctum')->group(function(){
-  Route::post('/weather/locations', [WeatherLocationsController::class,'store']);
-  Route::delete('/weather/locations/{id}', [WeatherLocationsController::class,'destroy']);
-});
+/* импортируем до пользовательских правил — чтобы не ругался postcss */
+@import "leaflet/dist/leaflet.css";
 
-Route::get('/leaderboard', [LeaderboardController::class,'index']);
-Route::post('/report', [ReportController::class,'store']);
+/* UI над картой */
+.leaflet-container { z-index: 0; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+CSS
+
+########################################
+# FRONTEND: index.tsx (точка входа)
+########################################
+cat > "$STAGE/frontend/src/index.tsx" <<'TSX'
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import App from './App';
+import './styles/global.css';
+
+const el = document.getElementById('root');
+if (el) {
+  const root = createRoot(el);
+  root.render(<App />);
+}
+TSX
+
+########################################
+# FRONTEND: public/index.html (минимальный шаблон)
+########################################
+cat > "$STAGE/frontend/public/index.html" <<'HTML'
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no" />
+    <title>FishTrack Pro</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/index.tsx"></script>
+  </body>
+</html>
+HTML
+
+########################################
+# Готовим zip
+########################################
+rm -f "$ZIP_NAME"
+( cd "$STAGE" && zip -qr "../$ZIP_NAME" . )
+echo "OK -> $ZIP_NAME"
