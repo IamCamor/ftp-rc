@@ -1,110 +1,61 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
-echo "=== FishTrackPro UI setup: Material Symbols icons ==="
+ROOT="src/config"
+FILE="$ROOT/ui.ts"
 
+mkdir -p "$ROOT"
 
-# 2. Стили
-mkdir -p frontend/src/styles
-cat > frontend/src/styles/material-icons.css <<'EOF'
-.material-symbols-rounded {
-  font-family: 'Material Symbols Rounded';
-  font-weight: normal;
-  font-style: normal;
-  font-size: 24px;
-  line-height: 1;
-  letter-spacing: normal;
-  text-transform: none;
-  display: inline-block;
-  white-space: nowrap;
-  word-wrap: normal;
-  direction: ltr;
-  -webkit-font-feature-settings: 'liga';
-  -webkit-font-smoothing: antialiased;
+cat > "$FILE" <<'TS'
+// UI-конфиги и ассеты приложения (только конфиг, без кода UI)
+// ВАЖНО: именованный экспорт ASSETS используется в ProfilePage.tsx
 
-  font-variation-settings:
-    'FILL' 0,
-    'wght' 400,
-    'GRAD' 0,
-    'opsz' 24;
-}
-EOF
+export type Assets = {
+  // Плейсхолдеры
+  avatarPlaceholder: string;
+  coverPlaceholder: string;
+  noPhoto: string;
 
-# 3. Конфиг
-mkdir -p frontend/src/config
-cat > frontend/src/config/ui.ts <<'EOF'
-export const UI = {
-  icons: {
-    nav: {
-      map: "map",
-      feed: "dynamic_feed",
-      alerts: "notifications",
-      profile: "account_circle",
-    },
-    actions: {
-      like: "favorite",
-      liked: "favorite",
-      comment: "mode_comment",
-      share: "ios_share",
-    },
-    appbar: {
-      weather: "cloud",
-      notifications: "notifications",
-      points: "place",
-      add: "add_circle",
-    },
+  // Брендинг
+  logoLight: string;
+  logoDark: string;
+
+  // Иконки типов точек/пинов (если нужно в будущем)
+  pins: {
+    catch: string;
+    place: string;
+    shop: string;
+    base: string;
+    slip: string;
+    farm: string;
+    club: string;
+    event: string;
+  };
+};
+
+export const ASSETS: Assets = {
+  // Путь можно поменять под вашу сборку (public/assets или src/assets)
+  avatarPlaceholder: "/assets/placeholder/avatar.png",
+  coverPlaceholder: "/assets/placeholder/cover.jpg",
+  noPhoto: "/assets/placeholder/no-photo.jpg",
+
+  logoLight: "/assets/brand/logo-light.svg",
+  logoDark: "/assets/brand/logo-dark.svg",
+
+  pins: {
+    catch: "/assets/pins/catch.svg",
+    place: "/assets/pins/place.svg",
+    shop: "/assets/pins/shop.svg",
+    base: "/assets/pins/base.svg",
+    slip: "/assets/pins/slip.svg",
+    farm: "/assets/pins/farm.svg",
+    club: "/assets/pins/club.svg",
+    event: "/assets/pins/event.svg",
   },
 };
-EOF
 
-# 4. Компонент Icon
-mkdir -p frontend/src/components
-cat > frontend/src/components/Icon.tsx <<'EOF'
-import React from "react";
+// Дополнительно можно экспортировать прочие UI-константы,
+// но ProfilePage.tsx критично требует именно именованный экспорт ASSETS.
+TS
 
-type Props = {
-  name: string;
-  size?: number;
-  fill?: 0 | 1;
-  weight?: 100|200|300|400|500|600|700;
-  grad?: number;
-  className?: string;
-  title?: string;
-};
-
-export default function Icon({
-  name,
-  size = 24,
-  fill = 0,
-  weight = 400,
-  grad = 0,
-  className = "",
-  title,
-}: Props) {
-  const style: React.CSSProperties = {
-    fontVariationSettings: `'FILL' ${fill}, 'wght' ${weight}, 'GRAD' ${grad}, 'opsz' ${size}`,
-    fontSize: size,
-  };
-  return (
-    <span
-      className={`material-symbols-rounded ${className}`}
-      style={style}
-      aria-hidden={title ? undefined : true}
-      title={title}
-    >
-      {name}
-    </span>
-  );
-}
-EOF
-
-echo "=== Done. Теперь импортируйте стили в main.tsx: ==="
-echo "import './styles/material-icons.css';"
-
-# 1. Подключение Google Fonts в index.html
-INDEX_HTML="frontend/index.html"
-if ! grep -q "Material+Symbols+Rounded" "$INDEX_HTML"; then
-  echo "Патчим $INDEX_HTML"
-  sed -i '/<head>/a \
-  <link rel="preconnect" href="https://fonts.googleapis.com" />\n  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />\n  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:FILL,wght,GRAD,opsz@0,400,0,24" rel="stylesheet" />' "$INDEX_HTML"
-fi
+echo "✓ Обновлён файл: $FILE"
