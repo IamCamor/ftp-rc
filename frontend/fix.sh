@@ -1,168 +1,76 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-# === Директории ===
-BASE_DIR="src"
-COMP_DIR="$BASE_DIR/components"
-PAGES_DIR="$BASE_DIR/pages"
-STYLES_DIR="$BASE_DIR/styles"
+# --- пути ---
+SRC_DIR="src"
+PAGES_DIR="$SRC_DIR/pages"
+PUBLIC_DIR="public"
+ASSETS_DIR="$PUBLIC_DIR/assets"
+PINS_DIR="$ASSETS_DIR/pins"
 
-echo "📂 Создаю директории..."
-mkdir -p "$COMP_DIR" "$PAGES_DIR" "$STYLES_DIR"
+mkdir -p "$PINS_DIR"
 
-# =========================
-# src/App.tsx
-# =========================
-cat > $BASE_DIR/App.tsx <<'EOF'
-import React from "react";
-import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
-import Header from "./components/Header";
-import BottomNav from "./components/BottomNav";
-import FeedScreen from "./pages/FeedScreen";
-import MapScreen from "./pages/MapScreen";
-import CatchDetailPage from "./pages/CatchDetailPage";
-import AddCatchPage from "./pages/AddCatchPage";
-import AddPlacePage from "./pages/AddPlacePage";
-import NotificationsPage from "./pages/NotificationsPage";
-import ProfilePage from "./pages/ProfilePage";
-import WeatherPage from "./pages/WeatherPage";
-import PlaceDetailPage from "./pages/PlaceDetailPage";
-import "./styles/app.css";
+echo "🖼  Кладу базовые assets…"
+# Лого
+cat > "$ASSETS_DIR/logo.png" <<'BIN'
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQImWNgYGAAAAAEAAGjCh0iAAAAAElFTkSuQmCC
+BIN
+# Аватар по умолчанию
+cat > "$ASSETS_DIR/default-avatar.png" <<'BIN'
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQImWNgYGBgAAAABQABH7s4xQAAAABJRU5ErkJggg==
+BIN
+# Фоновый паттерн
+cat > "$ASSETS_DIR/pattern.png" <<'BIN'
+iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAKElEQVQYV2NkwA7+//9/DIwMDAyGJgYGBtF4gQGRAaQYIhNGCQAACf0A4zJk8Z8AAAAAElFTkSuQmCC
+BIN
 
-function App() {
-  return (
-    <Router>
-      <div className="app-container">
-        <Header />
-        <main className="app-main">
-          <Routes>
-            <Route path="/" element={<FeedScreen />} />
-            <Route path="/map" element={<MapScreen />} />
-            <Route path="/catch/:id" element={<CatchDetailPage />} />
-            <Route path="/add-catch" element={<AddCatchPage />} />
-            <Route path="/add-place" element={<AddPlacePage />} />
-            <Route path="/alerts" element={<NotificationsPage />} />
-            <Route path="/profile" element={<ProfilePage />} />
-            <Route path="/weather" element={<WeatherPage />} />
-            <Route path="/place/:id" element={<PlaceDetailPage />} />
-          </Routes>
-        </main>
-        <BottomNav />
-      </div>
-    </Router>
-  );
-}
+echo "📍 Кладу SVG пины…"
+# минимальные SVG-иконки пинов
+cat > "$PINS_DIR/spot.svg" <<'SVG'
+<svg xmlns="http://www.w3.org/2000/svg" width="28" height="40" viewBox="0 0 24 24" fill="#2E7D32"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7Zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5Z"/></svg>
+SVG
+cat > "$PINS_DIR/catch.svg" <<'SVG'
+<svg xmlns="http://www.w3.org/2000/svg" width="28" height="40" viewBox="0 0 24 24" fill="#1976D2"><path d="M12 2C7.58 2 4 5.58 4 10c0 4.97 5.33 10.83 7.05 12.62.52.53 1.37.53 1.89 0C14.67 20.83 20 14.97 20 10c0-4.42-3.58-8-8-8Zm-1 12-3-3 1.41-1.41L11 10.17l4.59-4.59L17 7l-6 7Z"/></svg>
+SVG
+cat > "$PINS_DIR/shop.svg" <<'SVG'
+<svg xmlns="http://www.w3.org/2000/svg" width="28" height="40" viewBox="0 0 24 24" fill="#8E24AA"><path d="M4 4h16l-1 5H5L4 4Zm1 7h14v9H5v-9Zm3 2v5h2v-5H8Zm6 0v5h2v-5h-2Z"/></svg>
+SVG
+cat > "$PINS_DIR/base.svg" <<'SVG'
+<svg xmlns="http://www.w3.org/2000/svg" width="28" height="40" viewBox="0 0 24 24" fill="#D84315"><path d="M12 3 2 12h3v7h6v-5h2v5h6v-7h3L12 3Z"/></svg>
+SVG
+cat > "$PINS_DIR/default.svg" <<'SVG'
+<svg xmlns="http://www.w3.org/2000/svg" width="28" height="40" viewBox="0 0 24 24" fill="#455A64"><circle cx="12" cy="10" r="3"/><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7Z"/></svg>
+SVG
 
-export default App;
-EOF
-
-# =========================
-# src/main.tsx
-# =========================
-cat > $BASE_DIR/main.tsx <<'EOF'
-import React from "react";
-import ReactDOM from "react-dom/client";
-import App from "./App";
-import "leaflet/dist/leaflet.css";
-
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-);
-EOF
-
-# =========================
-# src/config.ts
-# =========================
-cat > $BASE_DIR/config.ts <<'EOF'
-/**
- * Централизованный конфиг:
- * - apiBase — обязательно с /api/v1
- * - assets — пути к логотипу/аватарке/фону
- * - icons — имена MUI-иконок (см. @mui/icons-material)
- * - pinTypes — карта типов точек к иконкам и стилям пинов
- */
-export const CONFIG = {
-  apiBase: "https://api.fishtrackpro.ru/api/v1",
-  assets: {
-    logo: "/assets/logo.png",
-    avatar: "/assets/default-avatar.png",
-    background: "/assets/pattern.png",
-  },
-  icons: {
-    // глобальные
-    feed: "Home",
-    map: "Map",
-    add: "AddCircle",
-    alerts: "Notifications",
-    profile: "Person",
-    like: "FavoriteBorder",
-    comment: "ChatBubbleOutline",
-    share: "Share",
-    weather: "WbSunny",
-    back: "ArrowBack",
-  },
-  // Настройка пинов по типам
-  pinTypes: {
-    spot: {
-      label: "Место",
-      iconUrl: "/assets/pins/spot.svg",
-      size: [28, 40],
-      anchor: [14, 40],
-      popupAnchor: [0, -36],
-    },
-    catch: {
-      label: "Улов",
-      iconUrl: "/assets/pins/catch.svg",
-      size: [28, 40],
-      anchor: [14, 40],
-      popupAnchor: [0, -36],
-    },
-    shop: {
-      label: "Магазин",
-      iconUrl: "/assets/pins/shop.svg",
-      size: [28, 40],
-      anchor: [14, 40],
-      popupAnchor: [0, -36],
-    },
-    base: {
-      label: "База",
-      iconUrl: "/assets/pins/base.svg",
-      size: [28, 40],
-      anchor: [14, 40],
-      popupAnchor: [0, -36],
-    },
-    // fallback
-    default: {
-      label: "Точка",
-      iconUrl: "/assets/pins/default.svg",
-      size: [28, 40],
-      anchor: [14, 40],
-      popupAnchor: [0, -36],
-    },
-  } as Record<string, {
-    label: string;
-    iconUrl: string;
-    size: [number, number];
-    anchor: [number, number];
-    popupAnchor: [number, number];
-  }>,
-} as const;
-EOF
-
-# =========================
-# src/api.ts
-# =========================
-cat > $BASE_DIR/api.ts <<'EOF'
+echo "🛠  Обновляю src/api.ts (нормализация ответов)…"
+# ПЕРЕЗАПИСЫВАЕМ api.ts — добавляем normalizeArray()
+cat > "$SRC_DIR/api.ts" <<'TS'
 import { CONFIG } from "./config";
 
 const BASE = CONFIG.apiBase;
 
+/** Нормализует произвольный ответ (массив/объект) к массиву элементов */
+function normalizeArray(payload: any): any[] {
+  if (Array.isArray(payload)) return payload;
+  if (payload == null) return [];
+  // наиболее вероятные контейнеры
+  if (Array.isArray(payload.items)) return payload.items;
+  if (Array.isArray(payload.data)) return payload.data;
+  if (Array.isArray(payload.points)) return payload.points;
+  // объект точек вида {id: {...}, ...}
+  if (typeof payload === "object") {
+    const vals = Object.values(payload);
+    // если это массив элементов внутри одного ключа
+    if (vals.length === 1 && Array.isArray(vals[0])) return vals[0] as any[];
+  }
+  console.warn("normalizeArray: неизвестный формат, возвращаю []", payload);
+  return [];
+}
+
 async function request(path: string, options: RequestInit = {}) {
   const res = await fetch(BASE + path, {
     ...options,
-    credentials: "include", // чтобы работали cookie с CORS
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
       ...(options.headers || {}),
@@ -178,16 +86,19 @@ async function request(path: string, options: RequestInit = {}) {
 
 export const API = {
   // Лента
-  feed: (limit = 10, offset = 0) =>
-    request(`/feed?limit=${limit}&offset=${offset}`),
+  feed: async (limit = 10, offset = 0) => {
+    const payload = await request(`/feed?limit=${limit}&offset=${offset}`);
+    return normalizeArray(payload);
+  },
 
-  // Карта/точки (по bbox: [minLng,minLat,maxLng,maxLat])
-  points: (bbox?: [number, number, number, number], limit = 500, filter?: string) => {
+  // Карта/точки
+  points: async (bbox?: [number, number, number, number], limit = 500, filter?: string) => {
     const params = new URLSearchParams();
     params.set("limit", String(limit));
     if (filter) params.set("filter", filter);
     if (bbox) params.set("bbox", bbox.join(","));
-    return request(`/map/points?` + params.toString());
+    const payload = await request(`/map/points?` + params.toString());
+    return normalizeArray(payload);
   },
 
   // Улов
@@ -203,196 +114,10 @@ export const API = {
   weather: (lat: number, lng: number, dt?: number) =>
     request(`/weather?lat=${lat}&lng=${lng}` + (dt ? `&dt=${dt}` : "")),
 };
-EOF
+TS
 
-# =========================
-# src/types.ts
-# =========================
-cat > $BASE_DIR/types.ts <<'EOF'
-export interface User {
-  id: number;
-  name: string;
-  avatar?: string;
-  bonuses?: number;
-}
-
-export interface CatchItem {
-  id: number;
-  user: User;
-  species: string;
-  lat?: number;
-  lng?: number;
-  length?: number;
-  weight?: number;
-  style?: string;
-  lure?: string;
-  tackle?: string;
-  notes?: string;
-  photo_url?: string;
-  created_at?: string;
-}
-
-export interface Place {
-  id: number;
-  name: string;
-  type?: string; // spot|shop|base|catch|...
-  lat: number;
-  lng: number;
-  photos?: string[];
-  description?: string;
-}
-EOF
-
-# =========================
-# components/Header.tsx
-# =========================
-cat > $COMP_DIR/Header.tsx <<'EOF'
-import React from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
-import { CONFIG } from "../config";
-import Icon from "./Icon";
-
-function Header() {
-  const loc = useLocation();
-  const navigate = useNavigate();
-
-  return (
-    <header className="app-header" style={{ backgroundImage: `url(${CONFIG.assets.background})` }}>
-      <div className="left">
-        <img src={CONFIG.assets.logo} alt="logo" className="logo" onClick={() => navigate("/")} />
-      </div>
-      <nav className="right">
-        <Link to="/weather" className="header-link" title="Погода">
-          <Icon name={CONFIG.icons.weather} />
-          <span className="hide-sm">Погода</span>
-        </Link>
-        <Link to="/alerts" className="header-link" title="Уведомления">
-          <Icon name={CONFIG.icons.alerts} />
-          <span className="badge">●</span>
-        </Link>
-        <Link to="/profile" className="header-link profile-link" title="Профиль">
-          <img src={CONFIG.assets.avatar} alt="avatar" className="avatar" />
-        </Link>
-      </nav>
-    </header>
-  );
-}
-
-export default Header;
-EOF
-
-# =========================
-# components/BottomNav.tsx
-# =========================
-cat > $COMP_DIR/BottomNav.tsx <<'EOF'
-import React from "react";
-import { NavLink } from "react-router-dom";
-import Icon from "./Icon";
-import { CONFIG } from "../config";
-
-function BottomNav() {
-  const nav = [
-    { to: "/", icon: CONFIG.icons.feed, label: "Лента", end: true },
-    { to: "/map", icon: CONFIG.icons.map, label: "Карта" },
-    { to: "/add-catch", icon: CONFIG.icons.add, label: "Добавить" },
-    { to: "/alerts", icon: CONFIG.icons.alerts, label: "Уведомл." },
-    { to: "/profile", icon: CONFIG.icons.profile, label: "Профиль" },
-  ];
-  return (
-    <nav className="bottom-nav">
-      {nav.map((i) => (
-        <NavLink
-          key={i.to}
-          to={i.to}
-          end={i.end as any}
-          className={({ isActive }) => "bn-item" + (isActive ? " active" : "")}
-        >
-          <Icon name={i.icon} />
-          <span>{i.label}</span>
-        </NavLink>
-      ))}
-    </nav>
-  );
-}
-export default BottomNav;
-EOF
-
-# =========================
-# components/Icon.tsx
-# =========================
-cat > $COMP_DIR/Icon.tsx <<'EOF'
-import React from "react";
-import * as Icons from "@mui/icons-material";
-
-// Универсальная обёртка для MUI-иконок (имена задаём в CONFIG.icons)
-export default function Icon({ name, size = 24 }: { name: string; size?: number }) {
-  const Cmp = (Icons as any)[name];
-  if (!Cmp) return <span className="icon-missing">{name}</span>;
-  return <Cmp style={{ fontSize: size }} />;
-}
-EOF
-
-# =========================
-# components/Avatar.tsx
-# =========================
-cat > $COMP_DIR/Avatar.tsx <<'EOF'
-import React from "react";
-import { CONFIG } from "../config";
-
-export default function Avatar({ src, size = 32 }: { src?: string; size?: number }) {
-  return (
-    <img
-      src={src || CONFIG.assets.avatar}
-      alt="avatar"
-      style={{ width: size, height: size }}
-      className="avatar"
-    />
-  );
-}
-EOF
-
-# =========================
-# components/MediaGrid.tsx
-# =========================
-cat > $COMP_DIR/MediaGrid.tsx <<'EOF'
-import React from "react";
-
-export default function MediaGrid({ photos }: { photos?: string[] }) {
-  if (!photos?.length) return null;
-  return (
-    <div className="media-grid">
-      {photos.map((src, i) => (
-        <img key={i} src={src} alt={`media-${i}`} />
-      ))}
-    </div>
-  );
-}
-EOF
-
-# =========================
-# components/PointPinCard.tsx
-# =========================
-cat > $COMP_DIR/PointPinCard.tsx <<'EOF'
-import React from "react";
-import { useNavigate } from "react-router-dom";
-import { Place } from "../types";
-import MediaGrid from "./MediaGrid";
-
-export default function PointPinCard({ place }: { place: Place }) {
-  const navigate = useNavigate();
-  return (
-    <div className="pin-card" onClick={() => navigate(`/place/${place.id}`)}>
-      <h3>{place.name}</h3>
-      <MediaGrid photos={place.photos} />
-    </div>
-  );
-}
-EOF
-
-# =========================
-# pages/MapScreen.tsx — карта + пины по типам + bbox-фетч + дебаунс + URL-состояние
-# =========================
-cat > $PAGES_DIR/MapScreen.tsx <<'EOF'
+echo "🗺  Обновляю src/pages/MapScreen.tsx (защита от не-массивов и валидация координат)…"
+cat > "$PAGES_DIR/MapScreen.tsx" <<'TSX'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from "react-leaflet";
 import L, { LatLngBounds } from "leaflet";
@@ -401,7 +126,6 @@ import { Place } from "../types";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { CONFIG } from "../config";
 
-// простая утилита дебаунса
 function debounce<T extends (...args: any[]) => void>(fn: T, ms: number) {
   let t: any;
   return (...args: Parameters<T>) => {
@@ -410,7 +134,6 @@ function debounce<T extends (...args: any[]) => void>(fn: T, ms: number) {
   };
 }
 
-// Кастомный компонент, слушает перемещения карты и вызывает onBBox
 function BBoxListener({ onBBox }: { onBBox: (b: [number, number, number, number]) => void }) {
   const handler = useMemo(
     () =>
@@ -435,7 +158,6 @@ function BBoxListener({ onBBox }: { onBBox: (b: [number, number, number, number]
   return null;
 }
 
-// Фабрика иконок пинов по типу
 function makeIconByType(type?: string) {
   const meta = CONFIG.pinTypes[type || ""] || CONFIG.pinTypes.default;
   return L.icon({
@@ -445,6 +167,10 @@ function makeIconByType(type?: string) {
     popupAnchor: meta.popupAnchor,
     className: "pin-icon",
   });
+}
+
+function isValidCoord(n: any) {
+  return typeof n === "number" && Number.isFinite(n);
 }
 
 export default function MapScreen() {
@@ -470,11 +196,26 @@ export default function MapScreen() {
       }
       try {
         setLoading(true);
-        const data = await API.points(bbox, 500);
-        cacheRef.current = { bboxKey: key, data };
-        setPoints(data);
+        const raw = await API.points(bbox, 500);
+        // Защита на случай если сервер вернул не массив
+        const arr: any[] = Array.isArray(raw) ? raw : [];
+        // Валидация координат
+        const normalized: Place[] = arr
+          .map((p: any) => ({
+            id: Number(p.id),
+            name: String(p.name ?? p.title ?? "Точка"),
+            type: p.type ?? p.kind ?? "default",
+            lat: Number(p.lat ?? p.latitude),
+            lng: Number(p.lng ?? p.longitude),
+            photos: Array.isArray(p.photos) ? p.photos : (p.photo_url ? [p.photo_url] : []),
+            description: p.description ?? p.caption ?? "",
+          }))
+          .filter((p) => isValidCoord(p.lat) && isValidCoord(p.lng));
+        cacheRef.current = { bboxKey: key, data: normalized };
+        setPoints(normalized);
       } catch (e) {
         console.error("points load error", e);
+        setPoints([]); // не даём сломаться map() в JSX
       } finally {
         setLoading(false);
       }
@@ -489,7 +230,6 @@ export default function MapScreen() {
     [fetchPoints]
   );
 
-  // Первичная загрузка: чуть увеличенный bbox вокруг стартовой точки
   useEffect(() => {
     const delta = 0.25;
     const bbox: [number, number, number, number] = [
@@ -501,7 +241,6 @@ export default function MapScreen() {
     fetchPoints(bbox);
   }, [initial, fetchPoints]);
 
-  // Синхроним положение карты в URL (при открытии попапов и кликах это не мешает)
   const onMapMovedPersist = (map: any) => {
     const c = map.getCenter();
     const z = map.getZoom();
@@ -533,7 +272,7 @@ export default function MapScreen() {
         />
         <BBoxListener onBBox={onBBox} />
         <MapEvents />
-        {points.map((p) => (
+        {Array.isArray(points) && points.map((p) => (
           <Marker
             key={p.id}
             position={[p.lat, p.lng]}
@@ -562,138 +301,7 @@ export default function MapScreen() {
     </div>
   );
 }
-EOF
+TSX
 
-# =========================
-# Заглушки/простые страницы (остальные)
-# =========================
-cat > $PAGES_DIR/FeedScreen.tsx <<'EOF'
-import React, { useEffect, useState } from "react";
-import { API } from "../api";
-import Icon from "../components/Icon";
-import { CONFIG } from "../config";
-
-export default function FeedScreen() {
-  const [items, setItems] = useState<any[]>([]);
-  const [offset, setOffset] = useState(0);
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line
-  }, []);
-
-  const load = async () => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      const data = await API.feed(10, offset);
-      setItems((s) => [...s, ...data]);
-      setOffset((o) => o + 10);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="page">
-      <h2>Лента</h2>
-      {items.map((it) => (
-        <div className="card" key={it.id}>
-          <div className="row">
-            <strong>{it.user_name || "Рыбак"}</strong>
-            <span className="muted">{new Date(it.created_at).toLocaleString()}</span>
-          </div>
-          <div className="row">
-            <span>{it.species}</span>
-          </div>
-          {it.media_url && <img src={it.media_url} alt="" className="w100" />}
-          <div className="row actions">
-            <span><Icon name={CONFIG.icons.like} /> {it.likes_count ?? 0}</span>
-            <span><Icon name={CONFIG.icons.comment} /> {it.comments_count ?? 0}</span>
-            <span><Icon name={CONFIG.icons.share} /></span>
-          </div>
-        </div>
-      ))}
-      <div className="center">
-        <button onClick={load} disabled={busy} className="btn">
-          {busy ? "Загрузка..." : "Ещё"}
-        </button>
-      </div>
-    </div>
-  );
-}
-EOF
-
-for page in CatchDetailPage AddCatchPage AddPlacePage NotificationsPage ProfilePage WeatherPage PlaceDetailPage; do
-cat > $PAGES_DIR/${page}.tsx <<EOF
-import React from "react";
-export default function ${page}() {
-  return <div className="page"><h2>${page}</h2><p>Страница в разработке.</p></div>;
-}
-EOF
-done
-
-# =========================
-# styles/app.css
-# =========================
-cat > $STYLES_DIR/app.css <<'EOF'
-:root{
-  --header-h:56px;
-  --bottom-h:64px;
-  --bg:#f7f7fa;
-  --text:#111;
-  --muted:#666;
-  --card:#fff;
-  --border:#e6e6ee;
-}
-
-*{box-sizing:border-box}
-html,body,#root{height:100%}
-body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,'Helvetica Neue',Arial;color:var(--text);background:var(--bg)}
-
-.app-container{min-height:100%;display:flex;flex-direction:column}
-.app-header{height:var(--header-h);display:flex;align-items:center;justify-content:space-between;padding:0 12px;background:#fff;border-bottom:1px solid var(--border);background-size:cover;background-position:center}
-.app-header .logo{height:34px;cursor:pointer}
-.app-header .right{display:flex;gap:12px;align-items:center}
-.header-link{display:flex;gap:6px;align-items:center;color:inherit;text-decoration:none;position:relative}
-.header-link .badge{position:absolute;top:-6px;right:-6px;font-size:10px;color:#f44}
-.avatar{width:32px;height:32px;border-radius:50%;object-fit:cover}
-
-.app-main{flex:1;min-height:0;padding-bottom:var(--bottom-h)}
-.page{max-width:780px;margin:0 auto;padding:16px}
-.center{text-align:center}
-.btn{background:#111;color:#fff;border:0;border-radius:10px;padding:10px 16px;cursor:pointer}
-.btn:disabled{opacity:.6;cursor:default}
-.muted{color:var(--muted)}
-
-.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:12px;margin-bottom:12px}
-.row{display:flex;gap:10px;align-items:center;justify-content:space-between}
-.w100{width:100%;border-radius:12px}
-
-.bottom-nav{position:fixed;left:0;right:0;bottom:0;height:var(--bottom-h);background:#fff;border-top:1px solid var(--border);display:flex;justify-content:space-around;align-items:center;z-index:1100}
-.bn-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:#333;text-decoration:none;font-size:12px;height:100%}
-.bn-item.active{color:#111;font-weight:600}
-
-.map-page{position:fixed;inset:var(--header-h) 0 var(--bottom-h) 0}
-.leaflet-container{height:100%;width:100%}
-.map-loader{position:absolute;right:8px;top:8px;background:#fff;border:1px solid var(--border);border-radius:10px;padding:6px 10px;z-index:1200}
-
-.popup-card{cursor:pointer;max-width:220px}
-.popup-title{display:flex;align-items:center;gap:6px;margin-bottom:6px}
-.popup-type{font-size:12px;color:#555;background:#f0f0f5;padding:2px 6px;border-radius:999px}
-.popup-photo{width:100%;border-radius:8px;margin-top:6px}
-.popup-link{margin-top:6px;color:#0a6efe;font-size:13px}
-
-.media-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
-.media-grid img{width:100%;height:90px;object-fit:cover;border-radius:8px}
-
-.hide-sm{display:none}
-@media (min-width:680px){ .hide-sm{display:inline} }
-EOF
-
-echo "✅ Готово! Файлы созданы/обновлены."
-echo "Проверь, что установлены зависимости: react, react-dom, react-router-dom, leaflet, react-leaflet, @mui/icons-material"
-echo "Пример: npm i react react-dom react-router-dom leaflet react-leaflet @mui/material @mui/icons-material"
+echo "✅ Готово. Обновлены src/api.ts и src/pages/MapScreen.tsx, добавлены assets."
+echo "ℹ️ Убедись, что у тебя есть зависимости: leaflet, react-leaflet, @mui/icons-material, @mui/material"

@@ -6,7 +6,6 @@ import { Place } from "../types";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { CONFIG } from "../config";
 
-// простая утилита дебаунса
 function debounce<T extends (...args: any[]) => void>(fn: T, ms: number) {
   let t: any;
   return (...args: Parameters<T>) => {
@@ -15,7 +14,6 @@ function debounce<T extends (...args: any[]) => void>(fn: T, ms: number) {
   };
 }
 
-// Кастомный компонент, слушает перемещения карты и вызывает onBBox
 function BBoxListener({ onBBox }: { onBBox: (b: [number, number, number, number]) => void }) {
   const handler = useMemo(
     () =>
@@ -40,7 +38,6 @@ function BBoxListener({ onBBox }: { onBBox: (b: [number, number, number, number]
   return null;
 }
 
-// Фабрика иконок пинов по типу
 function makeIconByType(type?: string) {
   const meta = CONFIG.pinTypes[type || ""] || CONFIG.pinTypes.default;
   return L.icon({
@@ -50,6 +47,10 @@ function makeIconByType(type?: string) {
     popupAnchor: meta.popupAnchor,
     className: "pin-icon",
   });
+}
+
+function isValidCoord(n: any) {
+  return typeof n === "number" && Number.isFinite(n);
 }
 
 export default function MapScreen() {
@@ -75,11 +76,26 @@ export default function MapScreen() {
       }
       try {
         setLoading(true);
-        const data = await API.points(bbox, 500);
-        cacheRef.current = { bboxKey: key, data };
-        setPoints(data);
+        const raw = await API.points(bbox, 500);
+        // Защита на случай если сервер вернул не массив
+        const arr: any[] = Array.isArray(raw) ? raw : [];
+        // Валидация координат
+        const normalized: Place[] = arr
+          .map((p: any) => ({
+            id: Number(p.id),
+            name: String(p.name ?? p.title ?? "Точка"),
+            type: p.type ?? p.kind ?? "default",
+            lat: Number(p.lat ?? p.latitude),
+            lng: Number(p.lng ?? p.longitude),
+            photos: Array.isArray(p.photos) ? p.photos : (p.photo_url ? [p.photo_url] : []),
+            description: p.description ?? p.caption ?? "",
+          }))
+          .filter((p) => isValidCoord(p.lat) && isValidCoord(p.lng));
+        cacheRef.current = { bboxKey: key, data: normalized };
+        setPoints(normalized);
       } catch (e) {
         console.error("points load error", e);
+        setPoints([]); // не даём сломаться map() в JSX
       } finally {
         setLoading(false);
       }
@@ -94,7 +110,6 @@ export default function MapScreen() {
     [fetchPoints]
   );
 
-  // Первичная загрузка: чуть увеличенный bbox вокруг стартовой точки
   useEffect(() => {
     const delta = 0.25;
     const bbox: [number, number, number, number] = [
@@ -106,7 +121,6 @@ export default function MapScreen() {
     fetchPoints(bbox);
   }, [initial, fetchPoints]);
 
-  // Синхроним положение карты в URL (при открытии попапов и кликах это не мешает)
   const onMapMovedPersist = (map: any) => {
     const c = map.getCenter();
     const z = map.getZoom();
@@ -138,7 +152,7 @@ export default function MapScreen() {
         />
         <BBoxListener onBBox={onBBox} />
         <MapEvents />
-        {points.map((p) => (
+        {Array.isArray(points) && points.map((p) => (
           <Marker
             key={p.id}
             position={[p.lat, p.lng]}
