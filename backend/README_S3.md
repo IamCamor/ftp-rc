@@ -1,1 +1,0 @@
-FishTrackPro — Sprint S3 Patch\n\nСодержит соц.фичи, события, чаты, уведомления, email-шаблоны, CRON-команды и сидеры.\n\nШаги:\n1) Скопируй backend/ в проект.\n2) Добавь маршруты из routes/api_s3_example.php в routes/api.php.\n3) Включи сидер в DatabaseSeeder или запусти: php artisan db:seed --class=S3DemoSeeder\n4) php artisan migrate\n5) php artisan schedule:work\n

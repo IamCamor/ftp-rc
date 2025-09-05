@@ -1,26 +1,36 @@
 import React from "react";
-import { ICONS } from "../config/ui";
 
 type Props = {
-  name: keyof typeof ICONS | string;
-  className?: string;
+  name: string;
   size?: number;
-  weight?: number;
-  grade?: number;
-  fill?: 0|1;
+  fill?: 0 | 1;
+  weight?: 100|200|300|400|500|600|700;
+  grad?: number;
+  className?: string;
   title?: string;
 };
 
-export default function Icon({ name, className="", size=24, weight=400, grade=0, fill=0, title }: Props){
-  const glyph = (ICONS as any)[name] ?? name;
+export default function Icon({
+  name,
+  size = 24,
+  fill = 0,
+  weight = 400,
+  grad = 0,
+  className = "",
+  title,
+}: Props) {
+  const style: React.CSSProperties = {
+    fontVariationSettings: `'FILL' ${fill}, 'wght' ${weight}, 'GRAD' ${grad}, 'opsz' ${size}`,
+    fontSize: size,
+  };
   return (
     <span
       className={`material-symbols-rounded ${className}`}
-      style={{ fontSize: size, fontVariationSettings: `'FILL' ${fill}, 'wght' ${weight}, 'GRAD' ${grade}, 'opsz' ${Math.max(20, size)}` }}
-      aria-label={title || (typeof name === "string" ? name : "")}
+      style={style}
+      aria-hidden={title ? undefined : true}
       title={title}
     >
-      {glyph}
+      {name}
     </span>
   );
 }
