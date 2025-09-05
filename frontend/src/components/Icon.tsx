@@ -1,9 +1,24 @@
-import React from "react";
-import * as MI from "@mui/icons-material";
-import { CONFIG } from "../config";
+import React from 'react';
+import { CONFIG, IconName } from '../config';
 
-// Универсальный компонент: <Icon name="Favorite" />
-export default function Icon({ name, size=24, className="", title }:{name:string,size?:number,className?:string,title?:string}) {
-  const IconComp = (MI as any)[CONFIG.icons[name] || name] || (MI as any)["HelpOutline"];
-  return <IconComp fontSize="inherit" sx={{ fontSize: size }} className={className} titleAccess={title} />;
+interface Props extends React.HTMLAttributes<HTMLSpanElement>{
+  name: IconName | string;
+  className?: string;
+  fill?: 0|1;
+  size?: number; // opsz
+  weight?: number; // wght
+  grade?: number; // GRAD
+  title?: string;
+}
+
+export default function Icon({name,className,fill=0,size=24,weight=400,grade=0,...rest}:Props){
+  const glyph = (CONFIG.Icons as any)[name] || name;
+  const style: React.CSSProperties = {
+    fontVariationSettings: `"FILL" ${fill}, "GRAD" ${grade}, "opsz" ${size}, "wght" ${weight}`
+  };
+  return (
+    <span className={`material-symbols-rounded icon ${className||''}`} style={style} {...rest}>
+      {glyph}
+    </span>
+  );
 }

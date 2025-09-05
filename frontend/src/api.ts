@@ -1,100 +1,117 @@
-import { CONFIG } from "./config";
-import type { Point, FeedItem, CatchRecord, NotificationItem, ProfileMe } from "./types";
+import { CONFIG } from './config';
+import type { CatchItem, Point, WeatherNow, NotificationItem, ProfileMe } from './types';
 
-/** универсальный fetch с «мягкой» обработкой бэков, которые могут отдавать {items} или голый массив */
-async function m3(path: string, init?: RequestInit) {
-  const url = path.startsWith("http") ? path : `${CONFIG.apiBase}${path}`;
-  const res = await fetch(url, {
-    credentials: "include",
-    headers: { "Accept": "application/json", ...(init?.headers||{}) },
-    ...init,
-  });
-  if (!res.ok) {
-    // попытка graceful fallback: если вдруг фронт смотрит на /api/v1, а бэк на /api
-    if (res.status === 404 && url.includes("/api/v1/")) {
-      const alt = url.replace("/api/v1/", "/api/");
-      const res2 = await fetch(alt, { credentials: "include", headers: { "Accept":"application/json" }, ...init });
-      if (!res2.ok) throw new Error(`${res2.status}`);
-      try { return await res2.json(); } catch { return null; }
-    }
-    throw new Error(`${res.status}`);
+const BASE = CONFIG.API_BASE;
+
+// Базовый fetch с отключёнными куками для публичных GET (чтобы не упираться в CORS credentials)
+async function get(path: string, opts: RequestInit = {}){
+  const res = await fetch(`${BASE}${path}`, { method:'GET', credentials:'omit', ...opts });
+  if(!res.ok) throw new Error(`${res.status}`);
+  return res.json();
+}
+async function post(path: string, body: any, isForm=false){
+  const init: RequestInit = { method:'POST', credentials:'include' };
+  if(isForm){
+    init.body = body as FormData;
+  } else {
+    init.headers = { 'Content-Type':'application/json' };
+    init.body = JSON.stringify(body);
   }
-  try { return await res.json(); } catch { return null; }
+  const res = await fetch(`${BASE}${path}`, init);
+  if(!res.ok) throw new Error(`${res.status}`);
+  return res.json();
 }
 
-function asArray<T=any>(data: any): T[] {
-  if (Array.isArray(data)) return data as T[];
-  if (Array.isArray(data?.items)) return data.items as T[];
-  if (Array.isArray(data?.data)) return data.data as T[];
-  return [];
+// Карта/точки
+export async function points(params: {limit?:number; filter?:string; bbox?:[number,number,number,number]} = {}): Promise<Point[]> {
+  const p = new URLSearchParams();
+  if(params.limit) p.set('limit', String(params.limit));
+  if(params.filter) p.set('filter', params.filter);
+  if(params.bbox) p.set('bbox', params.bbox.join(','));
+  const data = await get(`/map/points?${p.toString()}`);
+  // сервер возвращает {items:[...]}
+  const items = Array.isArray(data?.items) ? data.items : [];
+  return items as Point[];
 }
 
-export const API = {
-  // Карта: точки
-  async points(params: {limit?:number; bbox?:string; filter?:string} = {}): Promise<Point[]> {
-    const q = new URLSearchParams();
-    if (params.limit) q.set("limit", String(params.limit));
-    if (params.bbox)  q.set("bbox", params.bbox);
-    if (params.filter) q.set("filter", params.filter);
-    const data = await m3(`/map/points${q.toString() ? `?${q}` : ""}`);
-    return asArray<Point>(data);
-  },
+// Лента
+export async function feed(limit=10, offset=0): Promise<CatchItem[]> {
+  const p = new URLSearchParams();
+  p.set('limit', String(limit));
+  p.set('offset', String(offset));
+  const data = await get(`/feed?${p.toString()}`);
+  return Array.isArray(data?.items) ? data.items : [];
+}
 
-  async pointById(id: string|number): Promise<Point|null> {
-    const data = await m3(`/map/points/${id}`);
-    // Бэки могут вернуть {id, ...} или {data:{...}}
-    return data?.id ? data : (data?.data?.id ? data.data : data);
-  },
+// Улов
+export async function catchById(id: number|string): Promise<CatchItem> {
+  const data = await get(`/catch/${id}`);
+  return data as CatchItem;
+}
+export async function addCatch(payload: any){
+  // backend ожидает либо JSON, либо multipart — используем JSON (фото — отдельной загрузкой)
+  return post(`/catches`, payload, false);
+}
 
-  // Лента
-  async feed(limit=10, offset=0): Promise<FeedItem[]> {
-    const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) });
-    const data = await m3(`/feed?${qs}`);
-    return asArray<FeedItem>(data);
-  },
+// Точки
+export async function addPlace(payload: any){
+  return post(`/points`, payload, false);
+}
 
-  // Уловы
-  async catchById(id: number|string): Promise<CatchRecord|null> {
-    const data = await m3(`/catch/${id}`);
-    return data?.id ? data : (data?.data?.id ? data.data : data);
-  },
-
-  async addCatch(payload: Record<string,any>) {
-    return m3(`/catches`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-      headers: { "Content-Type":"application/json" }
-    });
-  },
-
-  // Точки
-  async addPlace(payload: Record<string,any>) {
-    return m3(`/points`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-      headers: { "Content-Type":"application/json" }
-    });
-  },
-
-  // Погода (не блокирует UX)
-  async weather(lat:number, lng:number, dt?:number) {
-    const qs = new URLSearchParams({ lat:String(lat), lng:String(lng) });
-    if (dt) qs.set("dt", String(dt));
-    // Бэкенд-прокси /weather → {temp, wind, pressure, source} | raw openweather
-    try { return await m3(`/weather?${qs}`); }
-    catch { return null; }
-  },
-
-  // Уведомления
-  async notifications(): Promise<NotificationItem[]> {
-    const data = await m3(`/notifications`).catch(()=>null);
-    return asArray<NotificationItem>(data);
-  },
-
-  // Профиль
-  async profile(): Promise<ProfileMe|null> {
-    const data = await m3(`/profile/me`).catch(()=>null);
-    if (!data) return null;
-    return data?.id ? data : (data?.data?.id ? data.data : data);
+// Погода proxy
+export async function weather(lat:number, lng:number, dt?:number): Promise<WeatherNow>{
+  const p = new URLSearchParams();
+  p.set('lat', String(lat));
+  p.set('lng', String(lng));
+  if(dt) p.set('dt', String(dt));
+  try{
+    const data = await get(`/weather?${p.toString()}`);
+    return data;
+  }catch(e){
+    // не блокируем — вернём пустую погоду
+    return { temp_c:null, wind_ms:null, source:'none' };
   }
-};
+}
+
+// Медиа
+export async function upload(files: File[]): Promise<{urls:string[]}>{
+  const fd = new FormData();
+  files.forEach(f=>fd.append('files[]', f));
+  return post(`/upload`, fd, true);
+}
+
+// Профиль/уведомления (могут быть за auth; если 401 — вернём заглушки)
+export async function profileMe(): Promise<ProfileMe|null>{
+  try {
+    const res = await fetch(`${BASE}/profile/me`, { credentials:'include' });
+    if(!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
+}
+export async function notifications(): Promise<NotificationItem[]>{
+  try{
+    const res = await fetch(`${BASE}/notifications`, { credentials:'include' });
+    if(!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data?.items)? data.items: [];
+  } catch { return []; }
+}
+
+// LocalStorage: избранные локации погоды
+const LS_KEY = 'weather_favorites';
+export interface WeatherFav { id:string; name:string; lat:number; lng:number; created_at:number; }
+export function getWeatherFavs(): WeatherFav[]{
+  try{
+    return JSON.parse(localStorage.getItem(LS_KEY) || '[]');
+  }catch{ return []; }
+}
+export function saveWeatherFav(f: WeatherFav){
+  const arr = getWeatherFavs();
+  const idx = arr.findIndex(x=>x.id===f.id);
+  if(idx>=0) arr[idx] = f; else arr.push(f);
+  localStorage.setItem(LS_KEY, JSON.stringify(arr));
+}
+export function removeWeatherFav(id: string){
+  const arr = getWeatherFavs().filter(x=>x.id!==id);
+  localStorage.setItem(LS_KEY, JSON.stringify(arr));
+}

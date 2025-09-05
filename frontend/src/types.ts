@@ -1,57 +1,57 @@
-export type LatLng = { lat:number; lng:number };
+export type Id = number | string;
 
-export type Point = {
-  id: number|string;
-  name?: string;
-  type?: "spot"|"catch"|"shop"|"base"|string;
-  lat: number;
-  lng: number;
-  photos?: string[];
-  description?: string;
-};
+export interface Media {
+  url: string;
+  type: 'image' | 'video';
+}
 
-export type FeedItem = {
-  id: number;
-  user_id: number;
-  user_name?: string;
+export interface Point {
+  id: Id;
+  title: string;
+  type: 'shop'|'slip'|'camp'|'catch'|'spot'|string;
+  lat: number; lng: number;
+  photo?: { url: string } | null;
+  photos?: Media[];
+}
+
+export interface CatchItem {
+  id: Id;
+  user_id: Id;
+  user_name: string;
   user_avatar?: string;
-  lat?: number;
-  lng?: number;
-  species?: string;
-  length?: number|string;
-  weight?: number|string;
-  method?: string;
-  bait?: string;
-  gear?: string;
-  caption?: string;
-  media_url?: string;
-  created_at?: string;
+  species?: string|null;
+  length?: number|null;
+  weight?: number|null;
+  method?: string|null;
+  bait?: string|null;
+  gear?: string|null;
+  caption?: string|null;
+  media_url?: string|null;
+  created_at: string;
+  lat?: number; lng?: number;
+  place_id?: Id|null;
   likes_count?: number;
   comments_count?: number;
-  liked_by_me?: 0|1|boolean;
-};
+  liked_by_me?: 0|1;
+}
 
-export type CatchRecord = FeedItem & {
-  media_urls?: string[];
-  weather?: any;
-  privacy?: "all"|"friends"|"private";
-  caught_at?: string;
-};
+export interface WeatherNow {
+  temp_c?: number|null;
+  wind_ms?: number|null;
+  source?: string;
+}
 
-export type NotificationItem = {
-  id: number;
+export interface NotificationItem {
+  id: Id;
   title: string;
   body?: string;
-  link?: string;
-  created_at?: string;
+  created_at: string;
   read?: boolean;
-};
+}
 
-export type ProfileMe = {
-  id: number;
+export interface ProfileMe {
+  id: Id;
   name: string;
   avatar?: string;
-  photo_url?: string;
-  email?: string;
-  stats?: { catches?: number; friends?: number; points?: number };
-};
+  bonuses?: number;
+}

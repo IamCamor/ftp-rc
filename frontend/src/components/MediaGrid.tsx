@@ -1,21 +1,13 @@
-import React from "react";
+import React from 'react';
+import type { Media } from '../types';
 
-export default function MediaGrid({items}:{items:{url:string,type?:string}[]}) {
-  if(!items?.length) return null;
+export default function MediaGrid({items}:{items:Media[]|undefined}){
+  if(!items || !items.length) return null;
   return (
     <div className="media-grid">
-      {items.map((m,idx)=>{
-        const isVideo = m.type?.startsWith("video") || /\.(mp4|webm|mov)$/i.test(m.url);
-        return (
-          <div key={idx} className="media-cell">
-            {isVideo ? (
-              <video src={m.url} controls playsInline/>
-            ) : (
-              <img src={m.url} loading="lazy" alt={`media-${idx}`}/>
-            )}
-          </div>
-        );
-      })}
+      {items.map((m,i)=> m.type==='video'
+        ? <video key={i} src={m.url} controls playsInline/>
+        : <img key={i} src={m.url} alt="" loading="lazy"/> )}
     </div>
   );
 }

@@ -1,84 +1,55 @@
-import React from "react";
-import Icon from "../components/Icon";
-import { API } from "../api";
+import React,{useEffect,useState} from 'react';
+import { getWeatherFavs, removeWeatherFav, weather } from '../api';
+import Icon from '../components/Icon';
 
-type SavedLoc = { id:string; name:string; lat:number; lng:number };
-type W = { temp?:number; wind?:number; pressure?:number; source?:string; };
-
-const storeKey = "weather.locations";
+interface Model {
+  id:string; name:string; lat:number; lng:number;
+  temp_c?: number|null;
+  wind_ms?: number|null;
+}
 
 export default function WeatherPage(){
-  const [list,setList]=React.useState<SavedLoc[]>(()=> {
-    try{ return JSON.parse(localStorage.getItem(storeKey)||"[]"); }catch{ return []; }
-  });
-  const [wx, setWx] = React.useState<Record<string,W>>({});
+  const [items,setItems]=useState<Model[]>([]);
+  const [loading,setLoading]=useState(false);
 
-  const add = async ()=>{
-    const name = prompt("Название локации (например, Дом)");
-    const lat = Number(prompt("Широта (lat), напр. 55.75"));
-    const lng = Number(prompt("Долгота (lng), напр. 37.62"));
-    if(!name || Number.isNaN(lat) || Number.isNaN(lng)) return;
-    const item = { id: Date.now().toString(), name, lat, lng };
-    const next = [...list, item];
-    setList(next);
-    localStorage.setItem(storeKey, JSON.stringify(next));
-    loadOne(item);
+  const load = async ()=>{
+    setLoading(true);
+    const favs = getWeatherFavs();
+    const enriched: Model[] = [];
+    for(const f of favs){
+      const w = await weather(f.lat, f.lng);
+      enriched.push({ ...f, temp_c: w.temp_c??null, wind_ms: w.wind_ms??null });
+    }
+    setItems(enriched);
+    setLoading(false);
   };
+
+  useEffect(()=>{ load(); },[]);
 
   const del = (id:string)=>{
-    const next = list.filter(i=>i.id!==id);
-    setList(next);
-    localStorage.setItem(storeKey, JSON.stringify(next));
+    removeWeatherFav(id);
+    load();
   };
-
-  const loadOne = async (loc:SavedLoc)=>{
-    try{
-      const data:any = await API.weather(loc.lat, loc.lng);
-      setWx(s=>({...s,[loc.id]:{
-        temp: data?.temp ?? data?.main?.temp,
-        wind: data?.wind_speed ?? data?.wind?.speed,
-        pressure: data?.pressure ?? data?.main?.pressure,
-        source: data?.source || "openweather"
-      }}));
-    }catch(e){
-      console.warn("weather failed", e);
-      setWx(s=>({...s,[loc.id]:{}}));
-    }
-  };
-
-  React.useEffect(()=>{
-    list.forEach(loadOne);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[]);
 
   return (
-    <div className="page weather-page">
-      <div className="page-title">
-        <Icon name="weather" size={24}/> <h1>Погода</h1>
-        <button className="btn" onClick={add}><Icon name="add" /> Добавить локацию</button>
-      </div>
-      {!list.length && <div className="empty">Добавьте свою первую локацию →</div>}
-      <div className="cards">
-        {list.map(loc=>{
-          const w = wx[loc.id]||{};
-          return (
-            <div key={loc.id} className="card">
-              <div className="card-h">
-                <div>
-                  <b>{loc.name}</b>
-                  <div className="muted">{loc.lat.toFixed(3)}, {loc.lng.toFixed(3)}</div>
-                </div>
-                <button className="icon-btn" onClick={()=>del(loc.id)} title="Удалить"><Icon name="delete"/></button>
-              </div>
-              <div className="wx">
-                <div><span className="lbl">Темп.</span><b>{w.temp ?? "—"}</b></div>
-                <div><span className="lbl">Ветер</span><b>{w.wind ?? "—"}</b></div>
-                <div><span className="lbl">Давл.</span><b>{w.pressure ?? "—"}</b></div>
-                <div className="muted small">src: {w.source||"—"}</div>
-              </div>
+    <div className="container" style={{paddingBottom:90}}>
+      <h2 style={{marginTop:12}}>Погода</h2>
+      <div className="grid" style={{marginTop:12}}>
+        {items.map(it=>(
+          <div key={it.id} className="glass-card card row" style={{justifyContent:'space-between'}}>
+            <div>
+              <div><b>{it.name}</b></div>
+              <div className="small">{it.lat.toFixed(4)}, {it.lng.toFixed(4)}</div>
             </div>
-          );
-        })}
+            <div className="row" style={{gap:12}}>
+              <span className="badge"><Icon name="temp"/>{it.temp_c??'—'}°C</span>
+              <span className="badge"><Icon name="wind"/>{it.wind_ms??'—'} м/с</span>
+              <a className="badge" onClick={()=>del(it.id)} style={{cursor:'pointer'}}>Удалить</a>
+            </div>
+          </div>
+        ))}
+        {!items.length && !loading && <div className="small">Сохраните локацию на карте: нажмите на карту → «Сохранить локацию погоды»</div>}
+        {loading && <div className="small">Обновляем…</div>}
       </div>
     </div>
   );

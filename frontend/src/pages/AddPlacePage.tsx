@@ -1,64 +1,75 @@
-import React from "react";
-import Icon from "../components/Icon";
-import { API } from "../api";
+import React, {useEffect, useRef, useState} from 'react';
+import { addPlace } from '../api';
+import Icon from '../components/Icon';
 
 export default function AddPlacePage(){
-  const [form,setForm]=React.useState<any>({ name:"", type:"spot", lat:"", lng:"", description:"" });
-  const [loading,setLoading]=React.useState(false);
+  const [form,setForm]=useState<any>({ title:'', type:'spot', lat:'', lng:'' });
+  const [pickMap,setPickMap]=useState(false);
+  const mapRef = useRef<any>(null);
+  const tempMarker = useRef<any>(null);
+  const [hint,setHint]=useState<string|null>(null);
 
-  const onChange=(e:React.ChangeEvent<HTMLInputElement|HTMLTextAreaElement|HTMLSelectElement>)=>{
-    const {name,value}=e.target;
-    setForm((s:any)=>({...s,[name]:value}));
-  };
+  const setField=(k:string,v:any)=> setForm((f:any)=>({...f,[k]:v}));
+
+  useEffect(()=>{
+    if(!pickMap) return;
+    if(!mapRef.current){
+      if(!(window as any).L){ setHint('Карта загружается…'); return; }
+      const L = (window as any).L;
+      const m = L.map('pick-map2',{zoomControl:true}).setView([55.75,37.61], 11);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(m);
+      m.on('click',(e:any)=>{
+        const {lat,lng}=e.latlng;
+        if(!tempMarker.current) tempMarker.current = L.marker([lat,lng]).addTo(m)
+        else tempMarker.current.setLatLng([lat,lng]);
+        setField('lat', lat.toFixed(6));
+        setField('lng', lng.toFixed(6));
+      });
+      mapRef.current = m;
+    } else {
+      mapRef.current.invalidateSize();
+    }
+  },[pickMap]);
 
   const submit=async(e:React.FormEvent)=>{
     e.preventDefault();
     try{
-      setLoading(true);
-      const payload = {
-        ...form,
-        lat: Number(form.lat),
-        lng: Number(form.lng),
-      };
-      const res = await API.addPlace(payload);
-      console.log(res);
-      alert("Место сохранено");
-    }catch(err:any){
-      alert("Ошибка сохранения: "+(err?.message||err));
-    }finally{ setLoading(false); }
+      await addPlace({ ...form, lat:parseFloat(form.lat), lng:parseFloat(form.lng) });
+      setHint('Точка добавлена');
+      setTimeout(()=>window.navigate?.('/map'),700);
+    }catch{
+      setHint('Ошибка сохранения');
+    }
   };
 
   return (
-    <div className="page addplace-page">
-      <div className="page-title">
-        <Icon name="addLocation" size={22}/> <h1>Добавить место</h1>
-      </div>
-      <form className="form" onSubmit={submit}>
-        <div className="grid">
-          <label>Название
-            <input name="name" value={form.name} onChange={onChange} placeholder="Название точки"/>
-          </label>
-          <label>Тип
-            <select name="type" value={form.type} onChange={onChange}>
-              <option value="spot">Место</option>
-              <option value="base">База</option>
-              <option value="shop">Магазин</option>
-            </select>
-          </label>
-          <label>Широта (lat)
-            <input name="lat" value={form.lat} onChange={onChange} placeholder="55.75"/>
-          </label>
-          <label>Долгота (lng)
-            <input name="lng" value={form.lng} onChange={onChange} placeholder="37.62"/>
-          </label>
-          <label className="full">Описание
-            <textarea name="description" value={form.description} onChange={onChange} placeholder="Кратко опишите место"/>
-          </label>
+    <div className="container" style={{paddingBottom:90}}>
+      <h2 style={{marginTop:12}}>Добавить точку</h2>
+      <form className="form-grid glass card" onSubmit={submit}>
+        <input className="input" placeholder="Название" value={form.title} onChange={e=>setField('title',e.target.value)}/>
+        <select className="select" value={form.type} onChange={e=>setField('type',e.target.value)}>
+          <option value="spot">Перспективное место</option>
+          <option value="catch">Улов</option>
+          <option value="shop">Магазин</option>
+          <option value="slip">Слип</option>
+          <option value="camp">Кемпинг</option>
+        </select>
+        <div className="form-inline">
+          <input className="input" placeholder="Широта" value={form.lat} onChange={e=>setField('lat',e.target.value)}/>
+          <input className="input" placeholder="Долгота" value={form.lng} onChange={e=>setField('lng',e.target.value)}/>
         </div>
-        <div className="form-actions">
-          <button className="btn primary" disabled={loading}><Icon name="save"/> {loading?"Сохранение…":"Сохранить место"}</button>
+
+        <div className="row" style={{gap:10}}>
+          <button type="button" className="button ghost" onClick={()=>setPickMap(v=>!v)}><Icon name="location"/> Выбрать на карте</button>
+        </div>
+        {pickMap && <div id="pick-map2" style={{height:300,borderRadius:12,overflow:'hidden',border:'1px solid var(--stroke)'}} />}
+
+        <div className="row" style={{justifyContent:'flex-end',gap:10}}>
+          <button type="button" className="button ghost" onClick={()=>window.navigate?.('/map')}>Отмена</button>
+          <button type="submit" className="button primary">Сохранить</button>
         </div>
       </form>
+      {hint && <div className="toast">{hint}</div>}
     </div>
   );
 }
