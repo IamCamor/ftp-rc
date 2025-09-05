@@ -35,8 +35,8 @@ async function http<T>(
   return ct.includes('application/json') ? res.json() as Promise<T> : (await res.text() as unknown as T);
 }
 
+/** Основной объект API */
 export const api = {
-  /* Публичные */
   feed: (params: {limit?:number; offset?:number; sort?:'new'|'top'; fish?:string; near?:string}={}) =>
     http('/feed', { query: params }),
 
@@ -55,7 +55,6 @@ export const api = {
   addPlace: (payload: any) =>
     http('/points', { method:'POST', body: payload }),
 
-  /* Приватные (cookie нужны) */
   me: () => http('/profile/me', { auth:true }),
   notifications: () => http('/notifications', { auth:true }),
   likeToggle: (catchId: number|string) => http(`/catch/${catchId}/like`, { method:'POST', auth:true }),
@@ -63,14 +62,13 @@ export const api = {
   followToggle: (userId: number|string) => http(`/follow/${userId}`, { method:'POST', auth:true }),
 };
 
-/* ---- Именованные экспорты для совместимости с текущим кодом ---- */
+/** Default export для удобства: import api from '../api' */
+export default api;
 
-// points(): просто прокидываем к api.points
+/* ---- Именованные экспорты для совместимости в местах, где уже так написано ---- */
 export const points = (params: {limit?:number; bbox?:string; filter?:string} = {}) => api.points(params);
 
-// Фавориты погоды (храним на фронте)
 const WEATHER_KEY = 'weather_favs';
-
 export type WeatherFav = { id: string; name: string; lat: number; lng: number };
 
 export const getWeatherFavs = (): WeatherFav[] => {

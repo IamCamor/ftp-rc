@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-FRONT="./frontend"
+ROOT="$(pwd)"
+FRONT="${ROOT}/frontend"
+SRC="${FRONT}/src"
 
-############################################
-# 1) Обновляем api.ts: добавим именованные экспорты
-############################################
-cat > "$FRONT/src/api.ts" <<'EOF'
+if [[ ! -d "${SRC}" ]]; then
+  echo "❌ Не найден каталог ${SRC}. Запусти скрипт из корня проекта, где есть frontend/src"
+  exit 1
+fi
+
+echo "→ Перезаписываю ${SRC}/api.ts согласованной версией…"
+cat > "${SRC}/api.ts" <<'EOF'
 import { API_BASE } from './config';
 
 type Method = 'GET'|'POST'|'PUT'|'PATCH'|'DELETE';
@@ -44,8 +49,8 @@ async function http<T>(
   return ct.includes('application/json') ? res.json() as Promise<T> : (await res.text() as unknown as T);
 }
 
+/** Основной объект API */
 export const api = {
-  /* Публичные */
   feed: (params: {limit?:number; offset?:number; sort?:'new'|'top'; fish?:string; near?:string}={}) =>
     http('/feed', { query: params }),
 
@@ -64,7 +69,6 @@ export const api = {
   addPlace: (payload: any) =>
     http('/points', { method:'POST', body: payload }),
 
-  /* Приватные (cookie нужны) */
   me: () => http('/profile/me', { auth:true }),
   notifications: () => http('/notifications', { auth:true }),
   likeToggle: (catchId: number|string) => http(`/catch/${catchId}/like`, { method:'POST', auth:true }),
@@ -72,14 +76,13 @@ export const api = {
   followToggle: (userId: number|string) => http(`/follow/${userId}`, { method:'POST', auth:true }),
 };
 
-/* ---- Именованные экспорты для совместимости с текущим кодом ---- */
+/** Default export для удобства: import api from '../api' */
+export default api;
 
-// points(): просто прокидываем к api.points
+/* ---- Именованные экспорты для совместимости в местах, где уже так написано ---- */
 export const points = (params: {limit?:number; bbox?:string; filter?:string} = {}) => api.points(params);
 
-// Фавориты погоды (храним на фронте)
 const WEATHER_KEY = 'weather_favs';
-
 export type WeatherFav = { id: string; name: string; lat: number; lng: number };
 
 export const getWeatherFavs = (): WeatherFav[] => {
@@ -101,15 +104,13 @@ export const saveWeatherFav = (fav: WeatherFav) => {
 };
 EOF
 
-############################################
-# 2) Обновляем MapScreen.tsx: корректные импорты/защиты
-############################################
-cat > "$FRONT/src/pages/MapScreen.tsx" <<'EOF'
+echo "→ Обновляю ${SRC}/pages/MapScreen.tsx под default импорт api (и именованные фавориты)…"
+cat > "${SRC}/pages/MapScreen.tsx" <<'EOF'
 import React, { useEffect, useRef, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { points, getWeatherFavs, saveWeatherFav } from '../api';
+import api, { getWeatherFavs, saveWeatherFav } from '../api';
 import { TILES_URL, UI_DIMENSIONS } from '../config';
 
 type Point = {
@@ -159,7 +160,7 @@ export default function MapScreen() {
         ? `${b.getWest().toFixed(2)},${b.getSouth().toFixed(2)},${b.getEast().toFixed(2)},${b.getNorth().toFixed(2)}`
         : undefined;
 
-      const raw = await points({ limit: 500, bbox });
+      const raw = await api.points({ limit: 500, bbox });
       const list = Array.isArray((raw as any)?.items) ? (raw as any).items
                  : Array.isArray(raw as any) ? (raw as any)
                  : Array.isArray((raw as any)?.data) ? (raw as any).data
@@ -258,5 +259,6 @@ export default function MapScreen() {
 }
 EOF
 
-echo "✅ Починил несовпадение экспортов: добавлены named-exports (points/getWeatherFavs/saveWeatherFav) и обновлён MapScreen.tsx."
-echo "Теперь сборка не должна падать на \"points is not exported\"."
+echo "→ Готово. Пересобери фронт:"
+echo "   cd frontend && npm run build"
+echo "✅ Если где-то ещё используется import { points } from '../api', он тоже будет работать, т.к. добавлен именованный экспорт."

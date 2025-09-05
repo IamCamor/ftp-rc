@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { points, getWeatherFavs, saveWeatherFav } from '../api';
+import api, { getWeatherFavs, saveWeatherFav } from '../api';
 import { TILES_URL, UI_DIMENSIONS } from '../config';
 
 type Point = {
@@ -52,7 +52,7 @@ export default function MapScreen() {
         ? `${b.getWest().toFixed(2)},${b.getSouth().toFixed(2)},${b.getEast().toFixed(2)},${b.getNorth().toFixed(2)}`
         : undefined;
 
-      const raw = await points({ limit: 500, bbox });
+      const raw = await api.points({ limit: 500, bbox });
       const list = Array.isArray((raw as any)?.items) ? (raw as any).items
                  : Array.isArray(raw as any) ? (raw as any)
                  : Array.isArray((raw as any)?.data) ? (raw as any).data
