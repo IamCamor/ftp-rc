@@ -26,7 +26,6 @@ async function http<T>(
 
   const res = await fetch(url.toString(), opts);
   if (!res.ok) {
-    // Пытаемся достать json-ошибку, но не падаем если не json
     let detail = '';
     try { detail = JSON.stringify(await res.clone().json()).slice(0,500); } catch { detail = (await res.text()).slice(0,500); }
     throw new Error(`${res.status} ${res.statusText} :: ${detail}`);
@@ -62,4 +61,32 @@ export const api = {
   likeToggle: (catchId: number|string) => http(`/catch/${catchId}/like`, { method:'POST', auth:true }),
   addComment: (catchId: number|string, payload: {text:string}) => http(`/catch/${catchId}/comments`, { method:'POST', body: payload, auth:true }),
   followToggle: (userId: number|string) => http(`/follow/${userId}`, { method:'POST', auth:true }),
+};
+
+/* ---- Именованные экспорты для совместимости с текущим кодом ---- */
+
+// points(): просто прокидываем к api.points
+export const points = (params: {limit?:number; bbox?:string; filter?:string} = {}) => api.points(params);
+
+// Фавориты погоды (храним на фронте)
+const WEATHER_KEY = 'weather_favs';
+
+export type WeatherFav = { id: string; name: string; lat: number; lng: number };
+
+export const getWeatherFavs = (): WeatherFav[] => {
+  try {
+    const raw = localStorage.getItem(WEATHER_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+};
+
+export const saveWeatherFav = (fav: WeatherFav) => {
+  const list = getWeatherFavs();
+  const idx = list.findIndex(x => x.id === fav.id);
+  if (idx >= 0) list[idx] = fav; else list.push(fav);
+  localStorage.setItem(WEATHER_KEY, JSON.stringify(list));
+  return list;
 };

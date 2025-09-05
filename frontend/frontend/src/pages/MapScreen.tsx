@@ -1,8 +1,8 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { api } from '../api';
+import { points, getWeatherFavs, saveWeatherFav } from '../api';
 import { TILES_URL, UI_DIMENSIONS } from '../config';
 
 type Point = {
@@ -35,14 +35,14 @@ function BoundsListener({ onBounds }: {onBounds: (b:L.LatLngBounds)=>void}) {
 }
 
 export default function MapScreen() {
-  const [points, setPoints] = useState<Point[]>([]);
+  const [data, setData] = useState<Point[]>([]);
   const [error, setError] = useState<string>('');
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Делаем явную высоту: 100dvh - header - bottomNav
+  // обеспечить высоту: 100vh - header - bottomNav
   useEffect(()=>{
     const h = window.innerHeight - UI_DIMENSIONS.header - UI_DIMENSIONS.bottomNav;
-    if (containerRef.current) containerRef.current.style.height = `${Math.max(h, 300)}px`;
+    if (containerRef.current) containerRef.current.style.height = `${Math.max(h, 320)}px`;
   },[]);
 
   const loadPoints = async (b?: L.LatLngBounds) => {
@@ -52,13 +52,12 @@ export default function MapScreen() {
         ? `${b.getWest().toFixed(2)},${b.getSouth().toFixed(2)},${b.getEast().toFixed(2)},${b.getNorth().toFixed(2)}`
         : undefined;
 
-      const data: any = await api.points({ limit: 500, bbox });
-      const list = Array.isArray(data?.items) ? data.items
-                 : Array.isArray(data) ? data
-                 : Array.isArray(data?.data) ? data.data
+      const raw = await points({ limit: 500, bbox });
+      const list = Array.isArray((raw as any)?.items) ? (raw as any).items
+                 : Array.isArray(raw as any) ? (raw as any)
+                 : Array.isArray((raw as any)?.data) ? (raw as any).data
                  : [];
 
-      // Нормализуем
       const normalized: Point[] = list.map((p:any)=>({
         id: Number(p.id ?? p.point_id ?? Math.random()*1e9),
         type: p.type ?? p.category ?? 'spot',
@@ -69,10 +68,10 @@ export default function MapScreen() {
         catch_id: p.catch_id ? Number(p.catch_id) : undefined,
       })).filter(p => !Number.isNaN(p.lat) && !Number.isNaN(p.lng));
 
-      setPoints(normalized);
+      setData(normalized);
     } catch (e:any) {
       setError(e?.message || 'Ошибка загрузки точек');
-      setPoints([]);
+      setData([]);
     }
   };
 
@@ -84,12 +83,20 @@ export default function MapScreen() {
     }
   };
 
+  const addToWeather = (p: Point) => {
+    const id = `point-${p.id}`;
+    saveWeatherFav({ id, name: p.title || 'Точка', lat: p.lat, lng: p.lng });
+    alert('Сохранено в Избранное погоды');
+  };
+
   return (
     <div className="p-3">
       <div className="glass card p-2 mb-3">
         <div className="flex items-center justify-between">
           <strong>Карта</strong>
-          <div className="text-sm opacity-80">Панорамный просмотр точек и уловов</div>
+          <div className="text-sm opacity-80">
+            {getWeatherFavs().length ? `Избранных локаций погоды: ${getWeatherFavs().length}` : 'Нет избранных локаций'}
+          </div>
         </div>
       </div>
 
@@ -97,41 +104,45 @@ export default function MapScreen() {
         <MapContainer center={defaultCenter} zoom={10} style={{width:'100%', height:'100%'}}>
           <TileLayer url={TILES_URL} attribution="&copy; OpenStreetMap contributors" />
           <BoundsListener onBounds={(b)=>loadPoints(b)} />
-          {points.map(p=>(
+          {data.map(p=>(
             <Marker key={`${p.id}-${p.lat}-${p.lng}`} position={[p.lat, p.lng]} icon={pinIcon}>
               <Popup>
                 <div style={{maxWidth: 240}}>
                   <div className="font-medium mb-2">{p.title || 'Точка'}</div>
+
                   {p.photos && p.photos.length > 0 ? (
-                    <div
-                      style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:8}}
-                    >
+                    <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:8}}>
                       {p.photos.slice(0,4).map((src, idx)=>(
                         <img
                           key={idx}
                           src={src}
                           alt="photo"
-                          style="cursor:pointer; width:100%; height:80px; object-fit:cover; border-radius:8px"
+                          style={{
+                            cursor:'pointer',
+                            width:'100%',
+                            height:'80px',
+                            objectFit:'cover',
+                            borderRadius:'8px'
+                          } as any}
                           onClick={()=>openEntity(p)}
-                          onKeyDown={(e)=>{ if (e.key==='Enter') openEntity(p); }}
-                          tabindex="0"
                         />
                       ))}
                     </div>
                   ) : (
-                    <button
-                      className="glass-light mt-1 px-3 py-2"
-                      onClick={()=>openEntity(p)}
-                    >
-                      Открыть
-                    </button>
+                    <div className="opacity-70 text-sm mb-2">Фотографий нет</div>
                   )}
+
+                  <div className="mt-2 flex gap-8">
+                    <button className="glass-light px-3 py-2" onClick={()=>openEntity(p)}>Открыть</button>
+                    <button className="glass-light px-3 py-2" onClick={()=>addToWeather(p)}>В погоду</button>
+                  </div>
                 </div>
               </Popup>
             </Marker>
           ))}
         </MapContainer>
       </div>
+
       {!!error && (
         <div className="mt-3 text-red-500 text-sm">Ошибка карты: {error}</div>
       )}
