@@ -1,92 +1,48 @@
-// src/api.ts
-export const API_BASE = (window as any).__API__ || "https://api.fishtrackpro.ru";
+import { CONFIG } from "./config";
 
-async function http<T>(path: string, opts: RequestInit = {}): Promise<T> {
-  const url = `${API_BASE}${path}`;
-  const res = await fetch(url, {
-    credentials: "include",
-    headers: { "Accept": "application/json", ...(opts.headers || {}) },
-    ...opts,
+const BASE = CONFIG.apiBase;
+
+async function request(path: string, options: RequestInit = {}) {
+  const res = await fetch(BASE + path, {
+    ...options,
+    credentials: "include", // чтобы работали cookie с CORS
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    },
   });
   if (!res.ok) {
-    let msg = `${res.status}`;
-    try {
-      const j = await res.json();
-      msg = j.message || JSON.stringify(j);
-    } catch {}
-    throw new Error(msg);
+    const text = await res.text().catch(() => "");
+    throw new Error(`API ${res.status}: ${text || res.statusText}`);
   }
-  return res.json();
+  const ct = res.headers.get("content-type") || "";
+  return ct.includes("application/json") ? res.json() : res.text();
 }
 
-export type BBox = [number, number, number, number];
+export const API = {
+  // Лента
+  feed: (limit = 10, offset = 0) =>
+    request(`/feed?limit=${limit}&offset=${offset}`),
 
-export const api = {
-  // Map points
-  points: (p: { filter?: string; bbox?: BBox; limit?: number } = {}) => {
+  // Карта/точки (по bbox: [minLng,minLat,maxLng,maxLat])
+  points: (bbox?: [number, number, number, number], limit = 500, filter?: string) => {
     const params = new URLSearchParams();
-    if (p.limit) params.set("limit", String(p.limit));
-    if (p.filter) params.set("filter", p.filter);
-    if (p.bbox) params.set("bbox", p.bbox.join(","));
-    return http<{ items: any[] }>(`/api/v1/map/points?${params}`);
+    params.set("limit", String(limit));
+    if (filter) params.set("filter", filter);
+    if (bbox) params.set("bbox", bbox.join(","));
+    return request(`/map/points?` + params.toString());
   },
 
-  // Feed
-  feed: (p: { limit?: number; offset?: number } = {}) => {
-    const params = new URLSearchParams();
-    if (p.limit) params.set("limit", String(p.limit));
-    if (p.offset) params.set("offset", String(p.offset));
-    return http<{ items: any[]; nextOffset?: number }>(`/api/v1/feed?${params}`);
-  },
-  catchById: (id: number|string) =>
-    http<any>(`/api/v1/catch/${id}`),
+  // Улов
+  catchById: (id: number) => request(`/catch/${id}`),
+  addCatch: (data: any) => request(`/catches`, { method: "POST", body: JSON.stringify(data) }),
 
-  // Uploads
-  upload: async (files: File[]) => {
-    const fd = new FormData();
-    files.forEach((f) => fd.append("files[]", f));
-    return http<{ items: { url: string }[] }>(`/api/v1/upload`, {
-      method: "POST",
-      body: fd,
-    });
-  },
+  // Места
+  addPlace: (data: any) => request(`/points`, { method: "POST", body: JSON.stringify(data) }),
 
-  // Catches
-  addCatch: (payload: any) =>
-    http<any>(`/api/v1/catches`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }),
-
-  // Places
-  addPlace: (payload: any) =>
-    http<any>(`/api/v1/points`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }),
-
-  // Weather (non-blocking)
-  weather: async (lat: number, lng: number, dt?: number) => {
-    try {
-      const params = new URLSearchParams({ lat: String(lat), lng: String(lng) });
-      if (dt) params.set("dt", String(dt));
-      return await http<any>(`/api/v1/weather?${params}`);
-    } catch (e) {
-      return { source: "openweather", error: "unavailable" };
-    }
-  },
-
-  // Social
-  likeCatch: (id: number|string) =>
-    http<{ ok: boolean }>(`/api/v1/catch/${id}/like`, { method: "POST" }),
-  addComment: (id: number|string, text: string) =>
-    http<{ ok: boolean }>(`/api/v1/catch/${id}/comments`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    }),
-  follow: (userId: number|string) =>
-    http<{ ok: boolean }>(`/api/v1/follow/${userId}`, { method: "POST" }),
+  // Уведомления/профиль/погода
+  notifications: () => request(`/notifications`),
+  profile: () => request(`/profile/me`),
+  weather: (lat: number, lng: number, dt?: number) =>
+    request(`/weather?lat=${lat}&lng=${lng}` + (dt ? `&dt=${dt}` : "")),
 };
