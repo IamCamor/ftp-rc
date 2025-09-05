@@ -1,32 +1,33 @@
 import React from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
-import { CONFIG } from "../config";
+import { Link } from "react-router-dom";
 import Icon from "./Icon";
+import { CONFIG } from "../config";
 
-function Header() {
-  const loc = useLocation();
-  const navigate = useNavigate();
-
+export default function Header({ points=0 }:{ points?:number }) {
   return (
-    <header className="app-header" style={{ backgroundImage: `url(${CONFIG.assets.background})` }}>
+    <header className="app-header">
       <div className="left">
-        <img src={CONFIG.assets.logo} alt="logo" className="logo" onClick={() => navigate("/")} />
+        <Link to="/map" className="logo">
+          <Icon name="logo" size={26}/>
+          <span>FishTrack Pro</span>
+        </Link>
       </div>
-      <nav className="right">
-        <Link to="/weather" className="header-link" title="Погода">
-          <Icon name={CONFIG.icons.weather} />
-          <span className="hide-sm">Погода</span>
-        </Link>
-        <Link to="/alerts" className="header-link" title="Уведомления">
-          <Icon name={CONFIG.icons.alerts} />
-          <span className="badge">●</span>
-        </Link>
-        <Link to="/profile" className="header-link profile-link" title="Профиль">
-          <img src={CONFIG.assets.avatar} alt="avatar" className="avatar" />
-        </Link>
+      <nav className="center">
+        <Link to={CONFIG.nav.topLinks.weather} className="hdr-link"><Icon name="weather" size={22}/>Погода</Link>
+        <Link to={CONFIG.nav.topLinks.map} className="hdr-link">Карта</Link>
+        <Link to={CONFIG.nav.topLinks.feed} className="hdr-link">Лента</Link>
       </nav>
+      <div className="right">
+        <Link to={CONFIG.nav.topLinks.notifications} className="icon-btn" aria-label="Уведомления">
+          <Icon name="notifications" size={24}/>
+        </Link>
+        <Link to={CONFIG.nav.topLinks.profile} className="avatar-btn">
+          <img src={CONFIG.images.avatarDefault} alt="me" />
+        </Link>
+        <div className="points" title="Бонусы">
+          <Icon name="rating" size={18}/> <b>{points}</b>
+        </div>
+      </div>
     </header>
   );
 }
-
-export default Header;

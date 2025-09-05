@@ -1,73 +1,63 @@
-/**
- * Централизованный конфиг:
- * - apiBase — обязательно с /api/v1
- * - assets — пути к логотипу/аватарке/фону
- * - icons — имена MUI-иконок (см. @mui/icons-material)
- * - pinTypes — карта типов точек к иконкам и стилям пинов
- */
 export const CONFIG = {
   apiBase: "https://api.fishtrackpro.ru/api/v1",
-  assets: {
-    logo: "/assets/logo.png",
-    avatar: "/assets/default-avatar.png",
-    background: "/assets/pattern.png",
-  },
+  siteBase: "https://www.fishtrackpro.ru",
+
+  // Иконки (Material Icons) — можно менять названия тут и в коде просто писать name="..."
   icons: {
-    // глобальные
-    feed: "Home",
-    map: "Map",
-    add: "AddCircle",
-    alerts: "Notifications",
-    profile: "Person",
-    like: "FavoriteBorder",
-    comment: "ChatBubbleOutline",
-    share: "Share",
+    logo: "Fishing",
     weather: "WbSunny",
+    notifications: "Notifications",
+    profile: "AccountCircle",
+    map: "Map",
+    feed: "DynamicFeed",
+    alerts: "NotificationsActive",
+    add: "Add",
+    like: "FavoriteBorder",
+    likeFilled: "Favorite",
+    comment: "ChatBubbleOutline",
+    share: "IosShare",
+    place: "Place",
     back: "ArrowBack",
-  },
-  // Настройка пинов по типам
+    edit: "Edit",
+    logout: "Logout",
+    friends: "Group",
+    rating: "EmojiEvents",
+    addPhoto: "AddPhotoAlternate",
+    addLocation: "AddLocationAlt",
+    save: "Save",
+    delete: "Delete",
+  } as Record<string,string>,
+
+  // Пины на карте
   pinTypes: {
-    spot: {
-      label: "Место",
-      iconUrl: "/assets/pins/spot.svg",
-      size: [28, 40],
-      anchor: [14, 40],
-      popupAnchor: [0, -36],
+    spot:       { iconUrl: "/assets/pins/spot.svg", label: "Место", size:[28,40], anchor:[14,38], popupAnchor:[0,-32] },
+    catch:      { iconUrl: "/assets/pins/catch.svg", label: "Улов", size:[28,40], anchor:[14,38], popupAnchor:[0,-32] },
+    shop:       { iconUrl: "/assets/pins/shop.svg", label: "Магазин", size:[28,40], anchor:[14,38], popupAnchor:[0,-32] },
+    base:       { iconUrl: "/assets/pins/base.svg", label: "База", size:[28,40], anchor:[14,38], popupAnchor:[0,-32] },
+    default:    { iconUrl: "/assets/pins/default.svg", label: "Точка", size:[28,40], anchor:[14,38], popupAnchor:[0,-32] },
+  } as any,
+
+  // Графика
+  images: {
+    logo: "/assets/logo.png",
+    avatarDefault: "/assets/default-avatar.png",
+    pattern: "/assets/pattern.png"
+  },
+
+  // Шапка/навигация
+  nav: {
+    topLinks: {
+      weather: "/weather",
+      notifications: "/alerts",
+      profile: "/profile",
+      map: "/map",
+      feed: "/feed",
     },
-    catch: {
-      label: "Улов",
-      iconUrl: "/assets/pins/catch.svg",
-      size: [28, 40],
-      anchor: [14, 40],
-      popupAnchor: [0, -36],
-    },
-    shop: {
-      label: "Магазин",
-      iconUrl: "/assets/pins/shop.svg",
-      size: [28, 40],
-      anchor: [14, 40],
-      popupAnchor: [0, -36],
-    },
-    base: {
-      label: "База",
-      iconUrl: "/assets/pins/base.svg",
-      size: [28, 40],
-      anchor: [14, 40],
-      popupAnchor: [0, -36],
-    },
-    // fallback
-    default: {
-      label: "Точка",
-      iconUrl: "/assets/pins/default.svg",
-      size: [28, 40],
-      anchor: [14, 40],
-      popupAnchor: [0, -36],
-    },
-  } as Record<string, {
-    label: string;
-    iconUrl: string;
-    size: [number, number];
-    anchor: [number, number];
-    popupAnchor: [number, number];
-  }>,
-} as const;
+    bottomTabs: [
+      { key: "map",  path: "/map",  label: "Карта", icon: "map" },
+      { key: "feed", path: "/feed", label: "Лента", icon: "feed" },
+      { key: "alerts", path: "/alerts", label: "Увед.", icon: "alerts" },
+      { key: "profile", path: "/profile", label: "Профиль", icon: "profile" },
+    ]
+  }
+};

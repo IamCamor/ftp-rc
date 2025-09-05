@@ -1,10 +1,23 @@
 import React from "react";
-import ReactDOM from "react-dom/client";
+import { createRoot } from "react-dom/client";
+import { BrowserRouter } from "react-router-dom";
 import App from "./App";
-import "leaflet/dist/leaflet.css";
+import "./styles/app.css";
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+declare global {
+  interface Window { API_BASE?: string }
+}
+
+// Позволяет при деплое переопределить базу API из <script>.
+if (!window.API_BASE) {
+  window.API_BASE = (location.protocol + "//" + location.host + "/api/v1");
+}
+
+const el = document.getElementById("root")!;
+createRoot(el).render(
   <React.StrictMode>
-    <App />
+    <BrowserRouter>
+      <App/>
+    </BrowserRouter>
   </React.StrictMode>
 );
