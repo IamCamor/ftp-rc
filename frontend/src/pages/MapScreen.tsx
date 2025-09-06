@@ -8,6 +8,8 @@ type Point = { id: number|string; lat:number; lng:number; type?:'place'|'catch'|
 const DEFAULT_CENTER:[number,number] = [55.75, 37.61];
 const DEFAULT_ZOOM = 10;
 
+const ensureArray=(x:any)=>Array.isArray(x)?x:(x&&Array.isArray(x.items)?x.items:(x&&Array.isArray(x.data)?x.data:(x&&Array.isArray(x.rows)?x.rows:[])));
+
 const MapScreen:React.FC = () => {
   const nav = useNavigate();
   const mapEl = useRef<HTMLDivElement|null>(null);

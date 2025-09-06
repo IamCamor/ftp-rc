@@ -8,49 +8,94 @@ type FetchOpts = {
 };
 
 function joinUrl(base:string, path:string) {
+  if (!base) return path;
   if (path.startsWith('http')) return path;
   const b = base.replace(/\/+$/,''); const p = path.replace(/^\/+/,'');
   return `${b}/${p}`;
 }
 
-async function httpRaw(url:string, opts:FetchOpts): Promise<Response> {
-  return fetch(url, {
-    method: opts.method ?? 'GET',
-    headers: opts.headers,
-    credentials: opts.credentials ?? 'include',
-    body: opts.body
+function dedupe<T>(arr:T[]):T[] {
+  const seen = new Set<string>();
+  return arr.filter((x:any) => {
+    const key = String(x || '');
+    if (seen.has(key)) return false;
+    seen.add(key); return true;
   });
 }
 
-/**
- * Пробуем несколько префиксов:
- *   /api/v1/xxx  → /api/xxx → /xxx
- */
-async function httpTry<T=any>(path:string, opts:FetchOpts = {}): Promise<T> {
-  const variants = [
-    path.startsWith('/api/v1/') ? path : `/api/v1${path.startsWith('/')?path:`/${path}`}`,
-    path.startsWith('/api/') ? path : `/api${path.startsWith('/')?path:`/${path}`}`,
-    path.startsWith('/') ? path : `/${path}`,
-  ];
-
-  let lastErr:any = null;
-  for (const v of variants) {
-    try {
-      const url = joinUrl(config.apiBase, v);
-      const res = await httpRaw(url, opts);
-      const text = await res.text();
-      let json:any; try { json = text ? JSON.parse(text) : {}; } catch { json = text; }
-      if (!res.ok) { lastErr = {status:res.status, payload:json}; continue; }
-      return json as T;
-    } catch (e:any) {
-      lastErr = e;
-      continue;
-    }
-  }
-  const err:any = new Error((lastErr && (lastErr.payload?.message || lastErr.payload?.error)) || 'Network/Route error');
-  err.cause = lastErr; throw err;
+async function httpRaw(url:string, opts:FetchOpts): Promise<{res:Response, raw:string, json:any}> {
+  const res = await fetch(url, {
+    method: opts.method ?? 'GET',
+    headers: opts.headers,
+    credentials: opts.credentials ?? 'include',
+    body: opts.body,
+    // mode: 'cors' // по умолчанию так и есть в браузере
+  });
+  const raw = await res.text();
+  let json:any;
+  try { json = raw ? JSON.parse(raw) : {}; } catch { json = raw; }
+  return { res, raw, json };
 }
 
+/**
+ * Пробуем несколько баз + префиксов путей.
+ * Базы:
+ *   1) config.apiBase
+ *   2) window.__API_BASE__
+ *   3) window.location.origin (поддержка reverse-proxy на том же домене)
+ *
+ * Префиксы:
+ *   /api/v1  →  /api  →  ''
+ */
+export async function httpTry<T=any>(path:string, opts:FetchOpts = {}): Promise<T> {
+  const bases = dedupe<string>([
+    config.apiBase || '',
+    (typeof window !== 'undefined' && (window as any).__API_BASE__) || '',
+    (typeof window !== 'undefined' && window.location?.origin) || ''
+  ]).filter(Boolean);
+
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  const pathVariants = dedupe<string>([
+    normalizedPath.startsWith('/api/v1/') ? normalizedPath : `/api/v1${normalizedPath}`,
+    normalizedPath.startsWith('/api/')    ? normalizedPath : `/api${normalizedPath}`,
+    normalizedPath
+  ]);
+
+  const tried: {url:string, status?:number, note?:string}[] = [];
+  let lastErr:any = null;
+
+  for (const base of bases) {
+    for (const pv of pathVariants) {
+      const url = joinUrl(base, pv);
+      try {
+        const {res, json} = await httpRaw(url, opts);
+        tried.push({url, status:res.status});
+        if (!res.ok) { lastErr = {status:res.status, payload:json}; continue; }
+        return json as T;
+      } catch (e:any) {
+        tried.push({url, note: e?.message || 'fetch error'});
+        lastErr = e;
+        continue;
+      }
+    }
+  }
+
+  if (config.debugNetwork && typeof window !== 'undefined') {
+    console.groupCollapsed(`🔴 httpTry fail: ${path}`);
+    console.table(tried);
+    console.groupEnd();
+  }
+
+  const msg =
+    (lastErr && (lastErr.payload?.message || lastErr.payload?.error)) ||
+    (typeof lastErr?.status === 'number' ? `HTTP ${lastErr.status}` : (lastErr?.message || 'Network/Route error'));
+
+  const err:any = new Error(msg);
+  (err as any).tried = tried;
+  throw err;
+}
+
+/** ---------- Вспомогательные хелперы ---------- */
 function normalizeArray(payload:any): any[] {
   if (Array.isArray(payload)) return payload;
   if (!payload) return [];
@@ -61,6 +106,25 @@ function normalizeArray(payload:any): any[] {
   return [];
 }
 
+/** Простой ping для проверки доступности API */
+export async function ping(): Promise<{ok:boolean, base:string}|null> {
+  const bases = dedupe<string>([
+    config.apiBase || '',
+    (typeof window !== 'undefined' && (window as any).__API_BASE__) || '',
+    (typeof window !== 'undefined' && window.location?.origin) || ''
+  ]).filter(Boolean);
+
+  for (const base of bases) {
+    try {
+      const u = joinUrl(base, '/api/health');
+      const {res} = await httpRaw(u, {method:'GET'});
+      if (res.ok) return {ok:true, base};
+    } catch {}
+  }
+  return null;
+}
+
+/** ---------- Endpoints ---------- */
 export type PointsQuery = { limit?: number; bbox?: string | [number,number,number,number]; filter?: string };
 export async function points(q: PointsQuery = {}): Promise<any[]> {
   const p = new URLSearchParams();
@@ -85,7 +149,7 @@ export async function notifications(): Promise<any[]> {
   return normalizeArray(res);
 }
 
-/** Форматируем ISO/строку в MySQL DATETIME (локально) */
+/** Форматирование даты в MySQL DATETIME (локально) */
 export function toMysqlDatetime(input: string|Date): string {
   const d = typeof input === 'string' ? new Date(input) : input;
   const pad = (n:number)=> (n<10?'0':'')+n;
@@ -140,21 +204,11 @@ export type PlacePayload = {
 export async function createPlace(payload: PlacePayload): Promise<any> {
   const body:any = { ...payload };
   if (payload.photos && payload.photos.length) {
-    body.photos = payload.photos; // backend должен принять массив
+    body.photos = payload.photos;
   }
   return postMultipart('/places', body);
 }
+
 export async function getPlaceById(id: string|number): Promise<any> {
   return httpTry<any>(`/places/${id}`, { method:'GET' });
 }
-
-const LS_KEY = 'weather_favs_v1';
-export type WeatherFav = { lat:number; lng:number; name:string };
-export function getWeatherFavs(): WeatherFav[] {
-  try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { return []; }
-}
-export async function saveWeatherFav(f: WeatherFav): Promise<void> {
-  const list = getWeatherFavs(); list.push(f);
-  localStorage.setItem(LS_KEY, JSON.stringify(list));
-}
-
