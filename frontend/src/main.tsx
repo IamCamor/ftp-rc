@@ -1,3 +1,4 @@
+import './styles/app.css';
 import './utils/fetchDebug';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
