@@ -1,618 +1,855 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${PWD}/frontend"
-SRC="${ROOT}/src"
-CMP="${SRC}/components"
-PAGES="${SRC}/pages"
-STY="${SRC}/styles"
+# ====== ПАРАМЕТРЫ (подкорректируй при необходимости) ======
+FRONTEND_DIR="frontend"
+BACKEND_DIR="backend"
+API_BASE="https://api.fishtrackpro.ru/api/v1"
+PUBLIC_SITE="https://www.fishtrackpro.ru"
+TILES_URL="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
 
-need() { [[ -d "$1" ]] || { echo "❌ Не найден каталог: $1"; exit 1; }; }
-need "$SRC"; need "$CMP"; need "$PAGES"; need "$STY"
+# ====== ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ЗАПИСИ ФАЙЛОВ ======
+write_file() {
+  local path="$1"; shift
+  mkdir -p "$(dirname "$path")"
+  cat > "$path" <<'EOF'
+'"$@"'
+EOF
+}
 
-############################################
-# 1) config.ts — базовый конфиг и размеры UI
-############################################
-cat > "${SRC}/config.ts" <<'TS'
-export const API_BASE = 'https://api.fishtrackpro.ru/api'; // без /v1 — добавим в api.ts
-export const TILES_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+echo "→ Проверяю папки..."
+[ -d "$FRONTEND_DIR" ] || { echo "❌ Нет папки $FRONTEND_DIR"; exit 1; }
+[ -d "$BACKEND_DIR" ] || { echo "❌ Нет папки $BACKEND_DIR"; exit 1; }
+
+# ====== FRONTEND: index.html (Material Symbols правильный selector) ======
+INDEX_HTML="${FRONTEND_DIR}/index.html"
+if [ -f "$INDEX_HTML" ]; then
+  echo "→ Патчу index.html (Material Symbols, meta, OSM)"
+  # Добавляем линк на Material Symbols Rounded с правильной осью:
+  # family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0
+  tmp="${INDEX_HTML}.tmp"
+  awk '
+    BEGIN{added=0}
+    /<\/head>/ && !added {
+      print "  <link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">"
+      print "  <link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>"
+      print "  <link href=\"https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0\" rel=\"stylesheet\">"
+      print "  <style>.material-symbols-rounded{font-variation-settings:\x27FILL\x27 0, \x27wght\x27 400, \x27GRAD\x27 0, \x27opsz\x27 24; vertical-align: -6px;}</style>"
+      added=1
+    }
+    {print}
+  ' "$INDEX_HTML" > "$tmp" && mv "$tmp" "$INDEX_HTML"
+else
+  echo "⚠️ ${INDEX_HTML} не найден — пропускаю."
+fi
+
+# ====== FRONTEND: styles/app.css с glassmorphism ======
+write_file "${FRONTEND_DIR}/src/styles/app.css" '
+:root{
+  --header-h:56px; --bottom-h:64px; --blur:12px;
+  --glass: rgba(255,255,255,0.08);
+  --glass-border: rgba(255,255,255,0.25);
+}
+html,body,#root{height:100%;margin:0;background:#0b0e14;color:#e6e6e6;font-family:Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;}
+.app-shell{display:grid;grid-template-rows:var(--header-h) 1fr var(--bottom-h);height:100%;}
+.header,.bottom{
+  backdrop-filter: blur(var(--blur));
+  -webkit-backdrop-filter: blur(var(--blur));
+  background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.04));
+  border-bottom:1px solid var(--glass-border);
+}
+.bottom{border-top:1px solid var(--glass-border); border-bottom:none;}
+.header-inner, .bottom-inner{max-width:1200px;margin:0 auto;display:flex;align-items:center;gap:12px;height:100%;padding:0 12px;}
+.icon{font-family:"Material Symbols Rounded";font-weight:normal;font-style:normal;display:inline-block;line-height:1;font-size:24px}
+.glass-card{
+  background: var(--glass); border:1px solid var(--glass-border);
+  border-radius:16px; backdrop-filter: blur(var(--blur)); -webkit-backdrop-filter: blur(var(--blur));
+}
+.map-wrap{position:relative;height:100%;width:100%;}
+.map-overlay{position:absolute;top:12px;left:12px;right:12px;display:flex;gap:12px;z-index:1000}
+.map-fab{
+  position:absolute;right:12px;bottom:12px;z-index:1000;
+  width:56px;height:56px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  background: #2b6cb0; color:#fff; border:none; cursor:pointer; box-shadow:0 10px 30px rgba(0,0,0,.3);
+}
+.leaflet-container{height:100%;width:100%;border-radius:12px;overflow:hidden}
+a{color:inherit;text-decoration:none}
+button{cursor:pointer}
+input,select,textarea{
+  background: rgba(255,255,255,0.06); border:1px solid var(--glass-border); color:#e6e6e6;
+  border-radius:12px; padding:10px 12px; width:100%;
+}
+form .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+form .row > * {width:100%}
+.card{padding:12px}
+.badge{padding:4px 8px;border-radius:999px;background:rgba(255,255,255,0.1);font-size:12px}
+.toolbar{display:flex;gap:8px;align-items:center}
+'
+
+# ====== FRONTEND: config.ts ======
+write_file "${FRONTEND_DIR}/src/config.ts" "
+export const API_BASE = '${API_BASE}';
+export const PUBLIC_SITE = '${PUBLIC_SITE}';
+export const TILES_URL = '${TILES_URL}';
 
 export const ICONS = {
-  // указываем имена иконок из Material Symbols Rounded
-  header: { weather: 'weather_mix', bell: 'notifications', add: 'add_circle', profile: 'account_circle' },
+  header: { weather: 'device_thermostat', bell: 'notifications', add: 'add_circle', profile: 'account_circle' },
   bottom: { feed: 'home', map: 'map', addCatch: 'add_photo_alternate', addPlace: 'add_location', alerts: 'notifications', profile: 'person' },
   actions: { like: 'favorite', comment: 'mode_comment', share: 'share', open: 'open_in_new', weatherSave: 'cloud_download' },
 };
 
 export const UI_DIMENSIONS = { header: 56, bottomNav: 64 };
-TS
 
-#############################
-# 2) styles/app.css — Material Icons + glass
-#############################
-cat > "${STY}/app.css" <<'CSS'
-@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,300..700,0..1,-50..200');
+export const DEFAULT_IMAGES = {
+  logo: '/assets/logo.svg',
+  avatar: '/assets/default-avatar.png',
+  backgroundPattern: '/assets/pattern.png',
+};
+"
 
-.material-symbols-rounded {
-  font-family: 'Material Symbols Rounded';
-  font-weight: normal;
-  font-style: normal;
-  font-size: 24px; /* Adjust as needed */
-  line-height: 1;
-  letter-spacing: normal;
-  text-transform: none;
-  display: inline-block;
-  white-space: nowrap;
-  direction: ltr;
-  -webkit-font-feature-settings: 'liga';
-  -webkit-font-smoothing: antialiased;
-  /* вариативные оси (важно: порядок осей соответствует CSS @import выше) */
-  font-variation-settings: 'opsz' 24, 'wght' 400, 'FILL' 0, 'GRAD' 0;
-}
+# ====== FRONTEND: types.ts ======
+write_file "${FRONTEND_DIR}/src/types.ts" '
+export type LatLng = { lat:number; lng:number };
 
-/* простая сетка и стек карт */
-:root {
-  --bg: #0b1220;
-  --glass-bg: rgba(255,255,255,0.06);
-  --glass-border: rgba(255,255,255,0.12);
-  --txt: #eaf0ff;
-  --muted: #a7b0c6;
-  --accent: #7cc1ff;
-}
+export type Point = {
+  id:number; type:"spot"|"service"|"warning"|"place";
+  title:string; lat:number; lng:number; photos?:string[]; catches_count?:number;
+};
 
-html, body, #root { height: 100%; }
-body { margin: 0; background: radial-gradient(1200px 800px at 20% -10%, rgba(124,193,255,0.10), transparent 60%), var(--bg); color: var(--txt); font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji','Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'; }
+export type FeedItem = {
+  id:number; user_id:number; user_name:string; user_avatar:string;
+  lat:number; lng:number; species?:string; length?:number; weight?:number;
+  method?:string; bait?:string; gear?:string; caption?:string;
+  media_url?:string; created_at:string; likes_count:number; comments_count:number; liked_by_me:number;
+};
 
-a { color: var(--accent); text-decoration: none; }
-a:hover { text-decoration: underline; }
+export type Profile = {
+  id:number; name:string; avatar?:string; points:number; rating?:number; bio?:string;
+};
 
-.glass { background: var(--glass-bg); border: 1px solid var(--glass-border); backdrop-filter: blur(10px); border-radius: 16px; }
-.glass-light { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14); backdrop-filter: blur(8px); border-radius: 10px; }
-.card { padding: 12px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.03); }
+export type WeatherFav = { id:string; name:string; lat:number; lng:number };
+export type Notification = { id:number; title:string; body:string; created_at:string; read?:boolean };
+export type Banner = { id:number; image:string; url:string; position:"feed_top"|"feed_inline"|"map_top"|"profile_top" };
+'
 
-.header { position: sticky; top: 0; z-index: 50; height: 56px; display: grid; grid-template-columns: 1fr auto auto auto; align-items: center; gap: 8px; padding: 8px 12px; }
-.header .brand { font-weight: 600; letter-spacing: 0.2px; }
+# ====== FRONTEND: api.ts ======
+write_file "${FRONTEND_DIR}/src/api.ts" '
+import { API_BASE } from "./config";
+import type { Point, FeedItem, Profile, WeatherFav, Notification, Banner } from "./types";
 
-.bottom-nav { position: fixed; left: 0; right: 0; bottom: 0; height: 64px; display: grid; grid-template-columns: repeat(5, 1fr); align-items: center; gap: 4px; padding: 8px; z-index: 50; }
-.bottom-nav a { color: var(--txt); opacity: 0.8; text-align: center; font-size: 12px; }
-.bottom-nav a.active { opacity: 1; color: white; }
+const j = async (res: Response) => {
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+};
 
-.btn { padding: 10px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.18); background: rgba(255,255,255,0.08); color: var(--txt); cursor: pointer; }
-.btn:disabled { opacity: 0.5; cursor: default; }
-
-.leaflet-container { background: #0a0f1b; }
-CSS
-
-##################################
-# 3) components/Icon.tsx — универсальная иконка
-##################################
-cat > "${CMP}/Icon.tsx" <<'TSX'
-import React from 'react';
-
-type Props = { name: string; size?: number; fill?: 0|1; weight?: number; grad?: number; className?: string; style?: React.CSSProperties };
-
-export default function Icon({ name, size=24, fill=0, weight=400, grad=0, className='', style }: Props) {
-  const styles: React.CSSProperties = {
-    fontVariationSettings: `'opsz' ${size}, 'wght' ${weight}, 'FILL' ${fill}, 'GRAD' ${grad}`,
-    fontSize: size,
-    ...style,
-  };
-  return <span className={`material-symbols-rounded ${className}`} style={styles} aria-hidden="true">{name}</span>;
-}
-TSX
-
-##################################
-# 4) components/Header.tsx — шапка с кнопками (погода/уведомления/профиль)
-##################################
-cat > "${CMP}/Header.tsx" <<'TSX'
-import React from 'react';
-import Icon from './Icon';
-import { ICONS } from '../config';
-
-export default function Header() {
-  return (
-    <div className="header glass">
-      <div className="brand"><a href="/feed">FishTrack<span style={{opacity:.6}}>Pro</span></a></div>
-      <a href="/weather" title="Погода" aria-label="Погода"><Icon name={ICONS.header.weather} /></a>
-      <a href="/alerts" title="Уведомления" aria-label="Уведомления"><Icon name={ICONS.header.bell} /></a>
-      <a href="/profile" title="Профиль" aria-label="Профиль"><Icon name={ICONS.header.profile} /></a>
-    </div>
-  );
-}
-TSX
-
-##################################
-# 5) components/BottomNav.tsx — нижнее меню (без #)
-##################################
-cat > "${CMP}/BottomNav.tsx" <<'TSX'
-import React from 'react';
-import Icon from './Icon';
-import { ICONS } from '../config';
-
-const items = [
-  { href:'/feed', label:'Лента', icon: ICONS.bottom.feed },
-  { href:'/map', label:'Карта', icon: ICONS.bottom.map },
-  { href:'/add-catch', label:'Улов', icon: ICONS.bottom.addCatch },
-  { href:'/add-place', label:'Место', icon: ICONS.bottom.addPlace },
-  { href:'/alerts', label:'Алерты', icon: ICONS.bottom.alerts },
-];
-
-export default function BottomNav(){
-  const path = typeof window !== 'undefined' ? window.location.pathname : '';
-  return (
-    <nav className="bottom-nav glass">
-      {items.map(it=>{
-        const active = path===it.href;
-        return (
-          <a key={it.href} href={it.href} className={active?'active':''} aria-label={it.label}>
-            <div><Icon name={it.icon} /></div>
-            <div style={{fontSize:10, marginTop:2}}>{it.label}</div>
-          </a>
-        );
-      })}
-    </nav>
-  );
-}
-TSX
-
-##################################
-# 6) api.ts — Единая обёртка, default export api + именованный points
-##################################
-cat > "${SRC}/api.ts" <<'TS'
-import { API_BASE } from './config';
-
-type Method = 'GET'|'POST'|'PUT'|'PATCH'|'DELETE';
-type Q = Record<string, string|number|boolean|undefined|null>;
-
-async function http<T>(path:string, {method='GET', body, auth=false, query}:{method?:Method; body?:any; auth?:boolean; query?:Q} = {}):Promise<T>{
-  const url = new URL(API_BASE + path);
-  if (query) Object.entries(query).forEach(([k,v])=>{
-    if (v!==undefined && v!==null && v!=='') url.searchParams.set(k,String(v));
+// базовая обёртка
+const req = async (path:string, init?:RequestInit) => {
+  const res = await fetch(`${API_BASE}${path}`, {
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    ...init,
   });
-  const opts: RequestInit = {
-    method,
-    mode:'cors',
-    credentials: auth ? 'include' : 'omit',
-    headers: body instanceof FormData ? {'Accept':'application/json'} : {'Content-Type':'application/json','Accept':'application/json'},
-    body: body ? (body instanceof FormData ? body : JSON.stringify(body)) : undefined,
-  };
-  const res = await fetch(url.toString(), opts);
-  if (!res.ok) {
-    let msg = '';
-    try { msg = JSON.stringify(await res.clone().json()); } catch { msg = await res.text(); }
-    throw new Error(`${res.status} ${res.statusText} :: ${msg.slice(0,400)}`);
-  }
-  if (res.status===204) return {} as T;
-  const ct = res.headers.get('content-type')||'';
-  return ct.includes('application/json') ? res.json() : (await res.text() as unknown as T);
-}
-
-export const api = {
-  // FEED / MAP (всегда через /v1)
-  feed: (p:{limit?:number; offset?:number; sort?:'new'|'top'; fish?:string; near?:string}={}) => http('/v1/feed',{query:p}),
-  points: (p:{limit?:number; bbox?:string; filter?:string}={}) => http('/v1/map/points',{query:p}),
-
-  // DETAIL
-  catchById: (id:number|string)=> http(`/v1/catch/${id}`),
-
-  // WEATHER
-  weather: (p:{lat:number; lng:number; dt?:number})=> http('/v1/weather',{query:p}),
-
-  // MUTATIONS
-  addCatch: (payload:any)=> http('/v1/catches',{method:'POST', body:payload}),
-  addPlace: (payload:any)=> http('/v1/points',{method:'POST', body:payload}),
-
-  // PROFILE / ALERTS
-  me: ()=> http('/v1/profile/me', {auth:true}),
-  notifications: ()=> http('/v1/notifications', {auth:true}),
-
-  // SOCIAL
-  likeToggle: (id:number|string)=> http(`/v1/catch/${id}/like`, {method:'POST', auth:true}),
-  addComment: (id:number|string, payload:{text:string})=> http(`/v1/catch/${id}/comments`, {method:'POST', body:payload, auth:true}),
-  followToggle: (userId:number|string)=> http(`/v1/follow/${userId}`, {method:'POST', auth:true}),
+  return j(res);
 };
 
-export default api;
-
-// совместимость для старых импортов { points }
-export const points = (p:{limit?:number; bbox?:string; filter?:string}={}) => api.points(p);
-
-// локальные «избранные локации погоды»
-const WEATHER_KEY = 'weather_favs';
-export type WeatherFav = { id: string; name: string; lat: number; lng: number };
-export const getWeatherFavs = ():WeatherFav[] => {
-  try { const v = localStorage.getItem(WEATHER_KEY); const arr = v? JSON.parse(v): []; return Array.isArray(arr)?arr:[]; } catch { return []; }
+// === Карта / точки ===
+export const getPoints = (params: {limit?:number; bbox?:string; filter?:string} = {}) => {
+  const q = new URLSearchParams();
+  if (params.limit) q.set("limit", String(params.limit));
+  if (params.bbox) q.set("bbox", params.bbox);
+  if (params.filter) q.set("filter", params.filter);
+  return req(`/map/points?${q.toString()}`);
 };
-export const saveWeatherFav = (fav:WeatherFav) => {
+export const addPoint = (payload: any) => req("/points", { method:"POST", body: JSON.stringify(payload) });
+export const getPlaceById = (id:number) => req(`/map/points/${id}`);
+
+// === Лента ===
+export const getFeed = (limit=10, offset=0): Promise<FeedItem[]> => req(`/feed?limit=${limit}&offset=${offset}`);
+export const getCatchById = (id:number) => req(`/catch/${id}`);
+export const addCatch = (payload:any) => req(`/catches`, { method:"POST", body: JSON.stringify(payload) });
+export const addComment = (catchId:number, payload:{text:string}) => req(`/catch/${catchId}/comments`, { method:"POST", body: JSON.stringify(payload) });
+export const toggleLike = (catchId:number) => req(`/catch/${catchId}/like`, { method:"POST" });
+
+// === Погода ===
+export const getWeather = (lat:number,lng:number, dt?:number) => {
+  const q = new URLSearchParams({ lat:String(lat), lng:String(lng) });
+  if (dt) q.set("dt", String(dt));
+  return req(`/weather?${q.toString()}`);
+};
+export const getWeatherFavs = (): WeatherFav[] => {
+  const raw = localStorage.getItem("weather_favs") || "[]";
+  try { return JSON.parse(raw) } catch { return [] }
+};
+export const saveWeatherFav = (fav: WeatherFav) => {
   const list = getWeatherFavs();
-  const i = list.findIndex(x=>x.id===fav.id);
-  if (i>=0) list[i]=fav; else list.push(fav);
-  localStorage.setItem(WEATHER_KEY, JSON.stringify(list));
+  const i = list.findIndex(x => x.id === fav.id);
+  if (i>=0) list[i] = fav; else list.push(fav);
+  localStorage.setItem("weather_favs", JSON.stringify(list));
   return list;
 };
-TS
 
-##################################
-# 7) pages/MapScreen.tsx — карта + добавление точки + «в погоду»
-##################################
-cat > "${PAGES}/MapScreen.tsx" <<'TSX'
-import React, { useEffect, useRef, useState } from 'react';
-import api, { getWeatherFavs, saveWeatherFav } from '../api';
-import { TILES_URL, UI_DIMENSIONS } from '../config';
-import Icon from '../components/Icon';
-import 'leaflet/dist/leaflet.css';
-import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from 'react-leaflet';
-import L from 'leaflet';
+// === Авторизация / Профиль ===
+export const login = (email:string, password:string) => req("/auth/login", { method:"POST", body: JSON.stringify({email,password}) });
+export const logout = () => req("/auth/logout", { method:"POST" });
+export const me = (): Promise<Profile> => req("/auth/me");
+export const updateProfile = (payload:any) => req("/profile/update", { method:"POST", body: JSON.stringify(payload) });
 
-type Point = {
-  id: number;
-  type?: string;
-  lat: number;
-  lng: number;
-  title?: string;
-  photos?: string[];
-  catch_id?: number;
-};
+// === Рейтинги / Баллы / Баннеры ===
+export const getRatings = (period: "day"|"week"|"month"|"all" = "week") => req(`/ratings?period=${period}`);
+export const getLedger = (limit=50, offset=0) => req(`/points/ledger?limit=${limit}&offset=${offset}`);
+export const getBanners = (position:string) => req(`/banners?position=${encodeURIComponent(position)}`);
 
-const defaultCenter: [number, number] = [55.751244, 37.618423];
-const pinIcon = new L.Icon({
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-  iconSize: [25,41],
-  iconAnchor: [12,41],
-});
+// === Уведомления ===
+export const getNotifications = () => req(`/notifications`);
+export const markNotification = (id:number) => req(`/notifications/${id}/read`, { method:"POST" });
+'
 
-function BoundsListener({ onBounds, onClick }: {onBounds:(b:L.LatLngBounds)=>void; onClick:(lat:number,lng:number)=>void}) {
-  useMapEvents({
-    moveend: (e)=> onBounds(e.target.getBounds()),
-    zoomend: (e)=> onBounds(e.target.getBounds()),
-    load: (e)=> onBounds(e.target.getBounds()),
-    click: (e)=> onClick(e.latlng.lat, e.latlng.lng),
-  });
-  return null;
+# ====== FRONTEND: Icon.tsx ======
+write_file "${FRONTEND_DIR}/src/components/Icon.tsx" '
+import React from "react";
+type Props = { name:string; className?:string; style?:React.CSSProperties; };
+export default function Icon({ name, className="", style }:Props){
+  return <span className={`material-symbols-rounded ${className}`} style={style}>{name}</span>;
 }
+'
 
-export default function MapScreen() {
-  const [data,setData] = useState<Point[]>([]);
-  const [error,setError] = useState('');
-  const [draft,setDraft] = useState<{lat:number;lng:number}|null>(null);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(()=>{
-    const h = window.innerHeight - UI_DIMENSIONS.header - UI_DIMENSIONS.bottomNav;
-    if (ref.current) ref.current.style.height = `${Math.max(h, 320)}px`;
-  },[]);
-
-  const load = async(b?:L.LatLngBounds)=>{
-    try{
-      setError('');
-      const bbox = b ? `${b.getWest().toFixed(2)},${b.getSouth().toFixed(2)},${b.getEast().toFixed(2)},${b.getNorth().toFixed(2)}` : undefined;
-      const raw:any = await api.points({limit:500, bbox});
-      const list = Array.isArray(raw?.items) ? raw.items
-                 : Array.isArray(raw?.data) ? raw.data
-                 : Array.isArray(raw) ? raw : [];
-      const normalized: Point[] = list.map((p:any)=>({
-        id: Number(p.id ?? p.point_id ?? Math.random()*1e9),
-        type: p.type ?? p.category ?? 'spot',
-        lat: Number(p.lat ?? p.latitude),
-        lng: Number(p.lng ?? p.longitude),
-        title: p.title ?? p.name ?? '',
-        photos: Array.isArray(p.photos) ? p.photos : (p.photo_url ? [p.photo_url] : []),
-        catch_id: p.catch_id ? Number(p.catch_id) : undefined,
-      })).filter(p=>!Number.isNaN(p.lat)&&!Number.isNaN(p.lng));
-      setData(normalized);
-    }catch(e:any){
-      setError(e?.message || 'Ошибка загрузки точек');
-      setData([]);
-    }
-  };
-
-  const openEntity = (p:Point)=> { window.location.href = p.catch_id ? `/catch/${p.catch_id}` : `/place/${p.id}`; };
-
-  const addToWeather = (lat:number,lng:number,name='Точка')=>{
-    const id = `point-${lat.toFixed(4)}-${lng.toFixed(4)}`;
-    saveWeatherFav({ id, name, lat, lng });
-    alert('Локация сохранена на странице погоды');
-  };
-
-  const savePlace = async ()=>{
-    if(!draft) return;
-    try{
-      await api.addPlace({ lat: draft.lat, lng: draft.lng, title:'Моё место' });
-      setDraft(null);
-      await load();
-      addToWeather(draft.lat,draft.lng,'Моё место');
-    }catch(e:any){
-      alert('Не удалось сохранить место: '+(e?.message||''));
-    }
-  };
-
-  return (
-    <div className="p-3">
-      <div className="glass card mb-3" style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12}}>
-        <div><strong>Карта</strong></div>
-        <div style={{display:'flex',gap:8}}>
-          <a className="btn" href="/add-place"><Icon name="add_location" />&nbsp;Добавить точку</a>
-          <a className="btn" href="/add-catch"><Icon name="add_photo_alternate" />&nbsp;Добавить улов</a>
-        </div>
-      </div>
-
-      <div ref={ref} className="card" style={{overflow:'hidden'}}>
-        <MapContainer center={defaultCenter} zoom={10} style={{width:'100%',height:'100%'}}>
-          <TileLayer url={TILES_URL} attribution="&copy; OpenStreetMap contributors"/>
-          <BoundsListener
-            onBounds={(b)=>load(b)}
-            onClick={(lat,lng)=> setDraft({lat,lng}) }
-          />
-
-          {data.map(p=>(
-            <Marker key={`${p.id}-${p.lat}-${p.lng}`} position={[p.lat,p.lng]} icon={pinIcon}>
-              <Popup>
-                <div style={{maxWidth:240}}>
-                  <div className="font-medium mb-2">{p.title || 'Точка'}</div>
-                  {p.photos && p.photos.length ? (
-                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-                      {p.photos.slice(0,4).map((src,idx)=>(
-                        <img key={idx} src={src} alt="" style={{width:'100%',height:'80px',objectFit:'cover',borderRadius:8,cursor:'pointer'}} onClick={()=>openEntity(p)} />
-                      ))}
-                    </div>
-                  ) : <div className="opacity-70 text-sm mb-2">Фото не прикреплены</div>}
-                  <div className="mt-2" style={{display:'flex',gap:8}}>
-                    <button className="btn" onClick={()=>openEntity(p)}><Icon name="open_in_new" />&nbsp;Открыть</button>
-                    <button className="btn" onClick={()=>addToWeather(p.lat,p.lng,p.title||'Точка')}><Icon name="cloud_download" />&nbsp;В погоду</button>
-                  </div>
-                </div>
-              </Popup>
-            </Marker>
-          ))}
-
-          {draft && (
-            <Marker position={[draft.lat,draft.lng]} icon={pinIcon}>
-              <Popup>
-                <div style={{maxWidth:220}}>
-                  Новая точка<br/>
-                  {draft.lat.toFixed(5)}, {draft.lng.toFixed(5)}
-                  <div className="mt-2" style={{display:'flex',gap:8}}>
-                    <button className="btn" onClick={savePlace}><Icon name="save" />&nbsp;Сохранить</button>
-                    <button className="btn" onClick={()=>setDraft(null)}><Icon name="close" />&nbsp;Отмена</button>
-                  </div>
-                </div>
-              </Popup>
-            </Marker>
-          )}
-        </MapContainer>
-      </div>
-
-      {!!error && <div className="mt-3" style={{color:'#ff9b9b'}}>Ошибка карты: {error}</div>}
-
-      <div className="glass card mt-3" style={{display:'flex',justifyContent:'space-between'}}>
-        <div>Избранные локации погоды: {getWeatherFavs().length || 0}</div>
-        <a className="btn" href="/weather"><Icon name="weather_mix" />&nbsp;Открыть погоду</a>
-      </div>
-    </div>
-  );
+# ====== FRONTEND: Avatar.tsx ======
+write_file "${FRONTEND_DIR}/src/components/Avatar.tsx" '
+import React from "react";
+import { DEFAULT_IMAGES } from "../config";
+export default function Avatar({ src, size=32, alt="" }:{src?:string; size?:number; alt?:string;}){
+  const s = { width:size, height:size, borderRadius:"50%", objectFit:"cover", border:"1px solid rgba(255,255,255,.2)" } as React.CSSProperties;
+  return <img src={src || DEFAULT_IMAGES.avatar} alt={alt} style={s} loading="lazy" />;
 }
-TSX
+'
 
-##################################
-# 8) pages/FeedScreen.tsx — лента на api.feed
-##################################
-cat > "${PAGES}/FeedScreen.tsx" <<'TSX'
-import React, { useEffect, useState } from 'react';
-import api from '../api';
-import Icon from '../components/Icon';
-
-type FeedItem = {
-  id:number;
-  user_name?:string;
-  media_url?:string;
-  caption?:string;
-  likes_count?:number;
-  comments_count?:number;
-  created_at?:string;
-};
-
-export default function FeedScreen(){
-  const [data,setData] = useState<FeedItem[]>([]);
-  const [error,setError] = useState('');
-
-  useEffect(()=>{
-    (async()=>{
-      try{
-        setError('');
-        const res:any = await api.feed({limit:10, offset:0});
-        const list = Array.isArray(res?.items) ? res.items
-                   : Array.isArray(res?.data) ? res.data
-                   : Array.isArray(res) ? res : [];
-        setData(list);
-      }catch(e:any){
-        setError(e?.message||'Ошибка ленты');
-      }
-    })();
-  },[]);
-
+# ====== FRONTEND: MediaGrid.tsx ======
+write_file "${FRONTEND_DIR}/src/components/MediaGrid.tsx" '
+import React from "react";
+export default function MediaGrid({ urls=[], onClick }:{urls?:string[]; onClick?:(url:string)=>void;}){
+  if (!urls.length) return null;
   return (
-    <div className="p-3" style={{paddingBottom:80}}>
-      <div className="glass card mb-3" style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-        <strong>Лента</strong>
-        <a className="btn" href="/add-catch"><Icon name="add_photo_alternate" />&nbsp;Добавить улов</a>
-      </div>
-      {!!error && <div className="card" style={{color:'#ff9b9b'}}>{error}</div>}
-      {data.map((it)=>(
-        <div key={it.id} className="card glass mb-3">
-          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
-            <div style={{width:32,height:32,borderRadius:'50%',background:'rgba(255,255,255,0.1)'}} />
-            <div style={{fontWeight:600}}>{it.user_name||'Рыбак'}</div>
-            <div style={{marginLeft:'auto', opacity:.7, fontSize:12}}>{new Date(it.created_at||Date.now()).toLocaleString()}</div>
-          </div>
-          {it.media_url && <img src={it.media_url} alt="" style={{width:'100%',borderRadius:12,objectFit:'cover',maxHeight:420}} />}
-          {it.caption && <div style={{marginTop:8}}>{it.caption}</div>}
-          <div style={{display:'flex',gap:16,marginTop:8}}>
-            <button className="btn"><Icon name="favorite" /> {it.likes_count ?? 0}</button>
-            <button className="btn"><Icon name="mode_comment" /> {it.comments_count ?? 0}</button>
-            <button className="btn"><Icon name="share" /> Поделиться</button>
-          </div>
-          <div style={{marginTop:8}}>
-            <a href={`/catch/${it.id}`}><Icon name="open_in_new" /> Открыть</a>
-          </div>
-        </div>
+    <div style={{display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8}}>
+      {urls.map(u=>(
+        <img key={u} src={u} alt="" style={{width:"100%", borderRadius:12, cursor:onClick?"pointer":"default"}} onClick={()=>onClick?.(u)} />
       ))}
     </div>
   );
 }
-TSX
+'
 
-##################################
-# 9) pages/NotificationsPage.tsx — использует /v1/notifications
-##################################
-cat > "${PAGES}/NotificationsPage.tsx" <<'TSX'
-import React, { useEffect, useState } from 'react';
-import api from '../api';
-
-type N = { id:number|string; type:string; text:string; created_at?:string };
-
-export default function NotificationsPage(){
-  const [list,setList] = useState<N[]>([]);
-  const [error,setError] = useState('');
-
-  useEffect(()=>{
-    (async()=>{
-      try{
-        setError('');
-        const res:any = await api.notifications();
-        const arr = Array.isArray(res?.items)?res.items : Array.isArray(res?.data)?res.data : Array.isArray(res)?res : [];
-        setList(arr);
-      }catch(e:any){
-        setError(e?.message||'Не удалось загрузить уведомления');
-      }
-    })();
-  },[]);
-
+# ====== FRONTEND: PointPinCard.tsx ======
+write_file "${FRONTEND_DIR}/src/components/PointPinCard.tsx" '
+import React from "react";
+import MediaGrid from "./MediaGrid";
+import Icon from "./Icon";
+export default function PointPinCard({ point, onOpen }:{point:any; onOpen:(id:number)=>void;}){
   return (
-    <div className="p-3" style={{paddingBottom:80}}>
-      <div className="glass card mb-3"><strong>Уведомления</strong></div>
-      {!!error && <div className="card" style={{color:'#ff9b9b'}}>{error}</div>}
-      {list.length===0 && !error && <div className="card">Уведомлений пока нет</div>}
-      {list.map(n=>(
-        <div key={String(n.id)} className="card glass mb-2">
-          <div style={{fontWeight:600, marginBottom:4}}>{n.type}</div>
-          <div>{n.text}</div>
-          <div style={{opacity:.6, fontSize:12, marginTop:6}}>{n.created_at? new Date(n.created_at).toLocaleString() : ''}</div>
-        </div>
-      ))}
+    <div className="glass-card card" style={{minWidth:260}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+        <div style={{fontWeight:600}}>{point.title || "Место"}</div>
+        <button className="badge" onClick={()=>onOpen(point.id)}><Icon name="open_in_new" /> открыть</button>
+      </div>
+      <MediaGrid urls={point.photos||[]} onClick={()=>onOpen(point.id)} />
+      <div style={{display:"flex",gap:8,marginTop:8,alignItems:"center"}}>
+        <Icon name="location_on" /><span>{point.lat.toFixed(5)}, {point.lng.toFixed(5)}</span>
+        {typeof point.catches_count==="number" && <span className="badge"><Icon name="bar_chart" /> {point.catches_count}</span>}
+      </div>
     </div>
   );
 }
-TSX
+'
 
-##################################
-# 10) pages/ProfilePage.tsx — /v1/profile/me
-##################################
-cat > "${PAGES}/ProfilePage.tsx" <<'TSX'
-import React, { useEffect, useState } from 'react';
-import api from '../api';
+# ====== FRONTEND: Header.tsx ======
+write_file "${FRONTEND_DIR}/src/components/Header.tsx" '
+import React from "react";
+import Icon from "./Icon";
+import Avatar from "./Avatar";
+import { ICONS, DEFAULT_IMAGES } from "../config";
 
-type Me = { id:number; name:string; points?:number; avatar_url?:string };
-
-export default function ProfilePage(){
-  const [me,setMe] = useState<Me|null>(null);
-  const [error,setError] = useState('');
-
-  useEffect(()=>{
-    (async()=>{
-      try{
-        setError('');
-        const res:any = await api.me();
-        setMe(res);
-      }catch(e:any){
-        setError(e?.message||'Не удалось загрузить профиль');
-      }
-    })();
-  },[]);
-
+export default function Header({ points, onWeatherClick, onAlertsClick, onAddClick, profile }:{
+  points?: number;
+  onWeatherClick?: ()=>void;
+  onAlertsClick?: ()=>void;
+  onAddClick?: ()=>void;
+  profile?: { name?:string; avatar?:string; points?:number };
+}){
   return (
-    <div className="p-3" style={{paddingBottom:80}}>
-      <div className="glass card mb-3"><strong>Профиль</strong></div>
-      {!!error && <div className="card" style={{color:'#ff9b9b'}}>{error}</div>}
-      {!me && !error && <div className="card">Не авторизован</div>}
-      {me && (
-        <div className="glass card">
-          <div style={{display:'flex',gap:12,alignItems:'center'}}>
-            <div style={{width:64,height:64,borderRadius:'50%',background:'rgba(255,255,255,0.1)',overflow:'hidden'}}>
-              {me.avatar_url && <img src={me.avatar_url} alt="" style={{width:'100%',height:'100%',objectFit:'cover'}}/>}
-            </div>
-            <div>
-              <div style={{fontWeight:700,fontSize:18}}>{me.name}</div>
-              <div style={{opacity:.7}}>Бонусы: {me.points ?? 0}</div>
-            </div>
-          </div>
+    <header className="header">
+      <div className="header-inner" style={{justifyContent:"space-between"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <img src={DEFAULT_IMAGES.logo} alt="logo" height={28} />
+          {!!points && <span className="badge"><Icon name="bolt" /> {points}</span>}
         </div>
-      )}
-    </div>
+        <div className="toolbar">
+          <button className="badge" onClick={onWeatherClick}><Icon name={ICONS.header.weather} /> Погода</button>
+          <button className="badge" onClick={onAlertsClick}><Icon name={ICONS.header.bell} /></button>
+          <button className="badge" onClick={onAddClick}><Icon name={ICONS.header.add} /></button>
+          <a className="badge" href="/profile"><Avatar src={profile?.avatar} size={28} /> Профиль</a>
+        </div>
+      </div>
+    </header>
   );
 }
-TSX
+'
 
-##################################
-# 11) App.tsx — маршруты без #, стек страниц
-##################################
-cat > "${SRC}/App.tsx" <<'TSX'
-import React from 'react';
-import Header from './components/Header';
-import BottomNav from './components/BottomNav';
-import FeedScreen from './pages/FeedScreen';
-import MapScreen from './pages/MapScreen';
-import NotificationsPage from './pages/NotificationsPage';
-import ProfilePage from './pages/ProfilePage';
-import './styles/app.css';
+# ====== FRONTEND: BottomNav.tsx ======
+write_file "${FRONTEND_DIR}/src/components/BottomNav.tsx" '
+import React from "react";
+import Icon from "./Icon";
+import { ICONS } from "../config";
 
-function RouterSwitch(){
-  const path = typeof window !== 'undefined' ? window.location.pathname : '/feed';
+const Item = ({href, name, label}:{href:string; name:string; label:string}) => (
+  <a href={href} style={{flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:4, padding:"8px 0"}}>
+    <Icon name={name} /><small>{label}</small>
+  </a>
+);
 
-  if (path === '/' || path === '/feed') return <FeedScreen />;
-  if (path.startsWith('/map')) return <MapScreen />;
-  if (path.startsWith('/alerts')) return <NotificationsPage />;
-  if (path.startsWith('/profile')) return <ProfilePage />;
+export default function BottomNav(){
+  return (
+    <footer className="bottom">
+      <div className="bottom-inner" style={{justifyContent:"space-around"}}>
+        <Item href="/feed" name={ICONS.bottom.feed} label="Лента" />
+        <Item href="/map" name={ICONS.bottom.map} label="Карта" />
+        <Item href="/add/catch" name={ICONS.bottom.addCatch} label="Улов" />
+        <Item href="/add/place" name={ICONS.bottom.addPlace} label="Место" />
+        <Item href="/alerts" name={ICONS.bottom.alerts} label="Уведомл." />
+        <Item href="/profile" name={ICONS.bottom.profile} label="Профиль" />
+      </div>
+    </footer>
+  );
+}
+'
 
-  // простые-заглушки — чтобы сборка не падала
-  if (path.startsWith('/add-catch')) return <div className="p-3"><div className="card">Форма добавления улова (в разработке)</div></div>;
-  if (path.startsWith('/add-place')) return <div className="p-3"><div className="card">Форма добавления места (в разработке)</div></div>;
-  if (path.startsWith('/weather')) return <div className="p-3"><div className="card">Погода (в разработке)</div></div>;
-  if (path.startsWith('/catch/')) return <div className="p-3"><div className="card">Карточка улова (в разработке)</div></div>;
-  if (path.startsWith('/place/')) return <div className="p-3"><div className="card">Карточка места (в разработке)</div></div>;
+# ====== FRONTEND: App.tsx ======
+write_file "${FRONTEND_DIR}/src/App.tsx" '
+import React from "react";
+import Header from "./components/Header";
+import BottomNav from "./components/BottomNav";
+import "./styles/app.css";
 
-  return <div className="p-3"><div className="card">Страница не найдена</div></div>;
+function useRoute(){
+  const [path, setPath] = React.useState(window.location.pathname);
+  React.useEffect(()=>{
+    const onPop = ()=>setPath(window.location.pathname);
+    window.addEventListener("popstate", onPop);
+    return ()=>window.removeEventListener("popstate", onPop);
+  },[]);
+  return path;
 }
 
 export default function App(){
+  const path = useRoute();
+  const goto = (p:string) => { if (p!==window.location.pathname){ window.history.pushState({}, "", p); window.dispatchEvent(new PopStateEvent("popstate")); } };
+  const onWeatherClick = ()=>goto("/weather");
+  const onAlertsClick = ()=>goto("/alerts");
+  const onAddClick = ()=>goto("/add/catch");
+
+  // лениво грузим страницы
+  const Page = React.useMemo(()=>{
+    if (path.startsWith("/map")) return React.lazy(()=>import("./pages/MapScreen"));
+    if (path.startsWith("/add/catch")) return React.lazy(()=>import("./pages/AddCatchPage"));
+    if (path.startsWith("/add/place")) return React.lazy(()=>import("./pages/AddPlacePage"));
+    if (path.startsWith("/catch/")) return React.lazy(()=>import("./pages/CatchDetailPage"));
+    if (path.startsWith("/place/")) return React.lazy(()=>import("./pages/PlaceDetailPage"));
+    if (path.startsWith("/alerts")) return React.lazy(()=>import("./pages/NotificationsPage"));
+    if (path.startsWith("/profile")) return React.lazy(()=>import("./pages/ProfilePage"));
+    if (path.startsWith("/weather")) return React.lazy(()=>import("./pages/WeatherPage"));
+    return React.lazy(()=>import("./pages/FeedScreen"));
+  },[path]);
+
   return (
-    <div>
-      <Header />
-      <RouterSwitch />
+    <div className="app-shell">
+      <Header onWeatherClick={onWeatherClick} onAlertsClick={onAlertsClick} onAddClick={onAddClick} />
+      <React.Suspense fallback={<div style={{padding:12}}>Загрузка...</div>}>
+        <Page />
+      </React.Suspense>
       <BottomNav />
     </div>
   );
 }
-TSX
+'
 
-##################################
-# 12) main.tsx — монтирование
-##################################
-cat > "${SRC}/main.tsx" <<'TSX'
-import React from 'react';
-import { createRoot } from 'react-dom/client';
-import App from './App';
+# ====== FRONTEND: main.tsx ======
+write_file "${FRONTEND_DIR}/src/main.tsx" '
+import React from "react";
+import { createRoot } from "react-dom/client";
+import App from "./App";
+createRoot(document.getElementById("root")!).render(<App />);
+'
 
-const rootEl = document.getElementById('root');
-if (rootEl) {
-  createRoot(rootEl).render(<App />);
+# ====== FRONTEND: страницы ======
+
+# FeedScreen.tsx
+write_file "${FRONTEND_DIR}/src/pages/FeedScreen.tsx" '
+import React from "react";
+import { getFeed, getBanners } from "../api";
+import Icon from "../components/Icon";
+import Avatar from "../components/Avatar";
+
+export default function FeedScreen(){
+  const [items, setItems] = React.useState<any[]>([]);
+  const [banner, setBanner] = React.useState<any|null>(null);
+
+  React.useEffect(()=>{
+    getFeed(10,0).then(setItems).catch(console.error);
+    getBanners("feed_top").then((b:any[])=>setBanner(b[0]||null)).catch(()=>{});
+  },[]);
+
+  const open = (id:number) => { window.history.pushState({}, "", `/catch/${id}`); window.dispatchEvent(new PopStateEvent("popstate")); };
+
+  return (
+    <div style={{padding:12}}>
+      {banner && <a href={banner.url}><img src={banner.image} alt="" style={{width:"100%",borderRadius:12,marginBottom:12}}/></a>}
+      {items.map(x=>(
+        <div key={x.id} className="glass-card card" style={{marginBottom:12}}>
+          <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8}}>
+            <Avatar src={x.user_avatar} />
+            <div style={{fontWeight:600}}>{x.user_name}</div>
+            <span className="badge" style={{marginLeft:"auto"}}>{new Date(x.created_at).toLocaleString()}</span>
+          </div>
+          {x.media_url && <img src={x.media_url} alt="" style={{width:"100%",borderRadius:12}} onClick={()=>open(x.id)} />}
+          {x.caption && <div style={{marginTop:8}}>{x.caption}</div>}
+          <div className="toolbar" style={{marginTop:8}}>
+            <button className="badge"><Icon name="favorite" /> {x.likes_count}</button>
+            <button className="badge"><Icon name="mode_comment" /> {x.comments_count}</button>
+            <button className="badge" style={{marginLeft:"auto"}} onClick={()=>open(x.id)}><Icon name="open_in_new" /> Открыть</button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
-TSX
+'
 
-echo "✅ Файлы обновлены. Теперь:"
-echo "1) cd frontend"
-echo "2) npm i"
-echo "3) npm run build"
-echo
-echo "Если бэкенд отдаёт API под /api/v1/* — всё ок. Иначе поправь API_BASE в src/config.ts."
+# MapScreen.tsx (Leaflet + сохранение локации в Погоду)
+write_file "${FRONTEND_DIR}/src/pages/MapScreen.tsx" '
+import React from "react";
+import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from "react-leaflet";
+import "leaflet/dist/leaflet.css";
+import L from "leaflet";
+import { getPoints, getWeather, getWeatherFavs, saveWeatherFav } from "../api";
+import type { Point } from "../types";
+import PointPinCard from "../components/PointPinCard";
+import { TILES_URL } from "../config";
+
+const icon = L.icon({ iconUrl:"https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png", iconSize:[25,41], iconAnchor:[12,41], popupAnchor:[1,-34], shadowUrl:"https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png" });
+
+function ClickToSave(){
+  useMapEvents({
+    click(e){
+      const lat = e.latlng.lat; const lng = e.latlng.lng;
+      const id = `${lat.toFixed(5)},${lng.toFixed(5)}`;
+      const name = `Место ${lat.toFixed(3)}, ${lng.toFixed(3)}`;
+      saveWeatherFav({ id, name, lat, lng });
+      alert("Локация сохранена в Погоду");
+    }
+  });
+  return null;
+}
+
+export default function MapScreen(){
+  const [points, setPoints] = React.useState<Point[]>([]);
+  const [center] = React.useState<[number,number]>([55.75,37.62]);
+
+  React.useEffect(()=>{
+    getPoints({ limit:500 }).then((r:any)=>setPoints(Array.isArray(r)? r : (r?.data||[]))).catch(console.error);
+  },[]);
+
+  const openPlace = (id:number) => {
+    window.history.pushState({}, "", `/place/${id}`);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  };
+
+  return (
+    <div className="map-wrap">
+      <div className="map-overlay">
+        <div className="glass-card card" style={{flex:1}}>
+          <b>Карта</b> — клик по карте сохранит локацию в раздел «Погода».  
+          <div style={{marginTop:6}} className="badge">Добавить точки/уловы — кнопки снизу.</div>
+        </div>
+      </div>
+      <MapContainer center={center} zoom={10} scrollWheelZoom style={{height:"100%", width:"100%"}}>
+        <TileLayer url={TILES_URL} />
+        <ClickToSave />
+        {points.map(p=>(
+          <Marker key={p.id} position={[p.lat,p.lng]} icon={icon}>
+            <Popup>
+              <PointPinCard point={p} onOpen={openPlace} />
+            </Popup>
+          </Marker>
+        ))}
+      </MapContainer>
+      <a className="map-fab" href="/add/place" title="Добавить место">+</a>
+    </div>
+  );
+}
+'
+
+# CatchDetailPage.tsx
+write_file "${FRONTEND_DIR}/src/pages/CatchDetailPage.tsx" '
+import React from "react";
+import { getCatchById, addComment } from "../api";
+import Icon from "../components/Icon";
+import Avatar from "../components/Avatar";
+
+export default function CatchDetailPage(){
+  const id = Number(window.location.pathname.split("/").pop());
+  const [data, setData] = React.useState<any|null>(null);
+  const [text, setText] = React.useState("");
+
+  React.useEffect(()=>{ getCatchById(id).then(setData).catch(console.error); },[id]);
+
+  const submit = async (e:any)=>{ e.preventDefault(); if(!text.trim()) return;
+    try{ await addComment(id,{text}); setText(""); const fresh = await getCatchById(id); setData(fresh); }catch(e){console.error(e);}
+  };
+
+  if(!data) return <div style={{padding:12}}>Загрузка...</div>;
+  return (
+    <div style={{padding:12}}>
+      <div className="glass-card card">
+        <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8}}>
+          <Avatar src={data.user_avatar} />
+          <div style={{fontWeight:600}}>{data.user_name}</div>
+          <span className="badge" style={{marginLeft:"auto"}}>{new Date(data.created_at).toLocaleString()}</span>
+        </div>
+        {data.media_url && <img src={data.media_url} alt="" style={{width:"100%",borderRadius:12}} />}
+        {data.caption && <div style={{marginTop:8}}>{data.caption}</div>}
+        <div className="toolbar" style={{marginTop:8}}>
+          <button className="badge"><Icon name="favorite" /> {data.likes_count}</button>
+          <button className="badge"><Icon name="share" /> Поделиться</button>
+        </div>
+      </div>
+
+      <form onSubmit={submit} style={{marginTop:12}} className="glass-card card">
+        <div style={{display:"flex",gap:8}}>
+          <input placeholder="Написать комментарий..." value={text} onChange={e=>setText(e.target.value)} />
+          <button className="badge" type="submit"><Icon name="send" /> Отправить</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+'
+
+# AddCatchPage.tsx
+write_file "${FRONTEND_DIR}/src/pages/AddCatchPage.tsx" '
+import React from "react";
+import { addCatch, getWeather } from "../api";
+
+export default function AddCatchPage(){
+  const [lat, setLat] = React.useState<number>(55.75);
+  const [lng, setLng] = React.useState<number>(37.62);
+  const [dt, setDt] = React.useState<string>(new Date().toISOString().slice(0,16));
+  const [species, setSpecies] = React.useState("");
+  const [caption, setCaption] = React.useState("");
+  const [photo, setPhoto] = React.useState("");
+  const [weather, setWeather] = React.useState<any|null>(null);
+
+  const fetchWeather = async ()=>{
+    const unix = Math.floor(new Date(dt).getTime()/1000);
+    try{ const w = await getWeather(lat, lng, unix); setWeather(w); }catch(e){ setWeather(null); }
+  };
+
+  const submit = async (e:any)=>{ e.preventDefault();
+    const payload:any = { lat, lng, caught_at: new Date(dt).toISOString().replace("Z",""), species, notes: caption, photo_url:photo, weather: weather||null };
+    await addCatch(payload);
+    alert("Улов добавлен");
+    window.history.pushState({}, "", "/feed"); window.dispatchEvent(new PopStateEvent("popstate"));
+  };
+
+  return (
+    <div style={{padding:12}}>
+      <form onSubmit={submit} className="glass-card card">
+        <h3>Добавить улов</h3>
+        <div className="row">
+          <div><label>Широта</label><input type="number" value={lat} onChange={e=>setLat(parseFloat(e.target.value))} step="0.00001" /></div>
+          <div><label>Долгота</label><input type="number" value={lng} onChange={e=>setLng(parseFloat(e.target.value))} step="0.00001" /></div>
+        </div>
+        <div className="row">
+          <div><label>Дата и время</label><input type="datetime-local" value={dt} onChange={e=>setDt(e.target.value)} /></div>
+          <div><label>Вид рыбы</label><input value={species} onChange={e=>setSpecies(e.target.value)} /></div>
+        </div>
+        <div><label>Фото (URL)</label><input value={photo} onChange={e=>setPhoto(e.target.value)} /></div>
+        <div><label>Описание</label><textarea value={caption} onChange={e=>setCaption(e.target.value)} rows={3} /></div>
+        <div className="toolbar" style={{marginTop:8}}>
+          <button className="badge" type="button" onClick={fetchWeather}>Подтянуть погоду</button>
+          <button className="badge" type="submit" style={{marginLeft:"auto"}}>Сохранить</button>
+        </div>
+        {weather && <div className="badge" style={{marginTop:8}}>Погода сохранена</div>}
+      </form>
+    </div>
+  );
+}
+'
+
+# AddPlacePage.tsx
+write_file "${FRONTEND_DIR}/src/pages/AddPlacePage.tsx" '
+import React from "react";
+import { addPoint } from "../api";
+
+export default function AddPlacePage(){
+  const [title, setTitle] = React.useState("");
+  const [lat, setLat] = React.useState<number>(55.75);
+  const [lng, setLng] = React.useState<number>(37.62);
+  const [photos, setPhotos] = React.useState("");
+
+  const submit = async (e:any)=>{ e.preventDefault();
+    const payload = { title, lat, lng, photos: photos.split(",").map(x=>x.trim()).filter(Boolean) };
+    await addPoint(payload);
+    alert("Место добавлено");
+    window.history.pushState({}, "", "/map"); window.dispatchEvent(new PopStateEvent("popstate"));
+  };
+
+  return (
+    <div style={{padding:12}}>
+      <form onSubmit={submit} className="glass-card card">
+        <h3>Добавить место</h3>
+        <div><label>Название</label><input value={title} onChange={e=>setTitle(e.target.value)} /></div>
+        <div className="row">
+          <div><label>Широта</label><input type="number" step="0.00001" value={lat} onChange={e=>setLat(parseFloat(e.target.value))}/></div>
+          <div><label>Долгота</label><input type="number" step="0.00001" value={lng} onChange={e=>setLng(parseFloat(e.target.value))}/></div>
+        </div>
+        <div><label>Фото (через запятую, URL)</label><input value={photos} onChange={e=>setPhotos(e.target.value)} /></div>
+        <div className="toolbar" style={{marginTop:8}}>
+          <button className="badge" type="submit" style={{marginLeft:"auto"}}>Сохранить</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+'
+
+# NotificationsPage.tsx
+write_file "${FRONTEND_DIR}/src/pages/NotificationsPage.tsx" '
+import React from "react";
+import { getNotifications, markNotification } from "../api";
+import Icon from "../components/Icon";
+
+export default function NotificationsPage(){
+  const [items,setItems] = React.useState<any[]>([]);
+  React.useEffect(()=>{ getNotifications().then(setItems).catch(console.error); },[]);
+  const mark = async(id:number)=>{ try{ await markNotification(id); setItems(s=>s.map(x=>x.id===id? {...x, read:true}:x)) }catch(e){console.error(e)} };
+  return (
+    <div style={{padding:12}}>
+      <h3 style={{marginBottom:8}}>Уведомления</h3>
+      {items.map(x=>(
+        <div key={x.id} className="glass-card card" style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+          <div>
+            <div style={{fontWeight:600}}>{x.title}</div>
+            <div style={{opacity:.8}}>{x.body}</div>
+          </div>
+          <button className="badge" onClick={()=>mark(x.id)} disabled={x.read}><Icon name="done" /> {x.read? "Прочитано":"Отметить"}</button>
+        </div>
+      ))}
+      {!items.length && <div className="glass-card card">Пока пусто</div>}
+    </div>
+  );
+}
+'
+
+# ProfilePage.tsx (авторизация front)
+write_file "${FRONTEND_DIR}/src/pages/ProfilePage.tsx" '
+import React from "react";
+import { me, login, logout, getLedger } from "../api";
+import Avatar from "../components/Avatar";
+import Icon from "../components/Icon";
+
+export default function ProfilePage(){
+  const [profile,setProfile] = React.useState<any|null>(null);
+  const [email,setEmail] = React.useState(""); const [password,setPassword] = React.useState("");
+  const [ledger,setLedger] = React.useState<any[]>([]);
+
+  const load = async()=>{
+    try{
+      const p = await me(); setProfile(p);
+      const l = await getLedger(20,0); setLedger(l?.items||l||[]);
+    }catch{ setProfile(null); }
+  };
+  React.useEffect(()=>{ load(); },[]);
+
+  const doLogin = async(e:any)=>{ e.preventDefault(); await login(email,password); await load(); };
+  const doLogout = async()=>{ await logout(); setProfile(null); };
+
+  if(!profile){
+    return (
+      <div style={{padding:12}}>
+        <form onSubmit={doLogin} className="glass-card card" style={{maxWidth:420, margin:"0 auto"}}>
+          <h3>Вход</h3>
+          <div><label>E-mail</label><input value={email} onChange={e=>setEmail(e.target.value)}/></div>
+          <div><label>Пароль</label><input type="password" value={password} onChange={e=>setPassword(e.target.value)}/></div>
+          <div className="toolbar" style={{marginTop:8}}>
+            <button className="badge" type="submit" style={{marginLeft:"auto"}}>Войти</button>
+          </div>
+        </form>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{padding:12, display:"grid", gap:12}}>
+      <div className="glass-card card" style={{display:"flex",gap:12,alignItems:"center"}}>
+        <Avatar src={profile.avatar} size={56} />
+        <div style={{fontSize:18, fontWeight:700}}>{profile.name}</div>
+        <span className="badge" style={{marginLeft:"auto"}}><Icon name="bolt" /> {profile.points} баллов</span>
+        <button className="badge" onClick={doLogout}>Выйти</button>
+      </div>
+
+      <div className="glass-card card">
+        <h4 style={{marginTop:0}}>Бонусы (ledger)</h4>
+        {ledger.map((x:any)=>(
+          <div key={x.id} style={{display:"flex",gap:8,alignItems:"center",padding:"6px 0", borderBottom:"1px solid rgba(255,255,255,.08)"}}>
+            <span className="badge">{new Date(x.created_at).toLocaleString()}</span>
+            <div style={{flex:1}}>{x.reason}</div>
+            <b style={{color:x.delta>0?"#4ade80":"#f87171"}}>{x.delta>0? "+":""}{x.delta}</b>
+            <span className="badge">Баланс: {x.balance}</span>
+          </div>
+        ))}
+        {!ledger.length && <div>Нет начислений</div>}
+      </div>
+    </div>
+  );
+}
+'
+
+# WeatherPage.tsx
+write_file "${FRONTEND_DIR}/src/pages/WeatherPage.tsx" '
+import React from "react";
+import { getWeatherFavs, getWeather } from "../api";
+import Icon from "../components/Icon";
+
+export default function WeatherPage(){
+  const [favs,setFavs] = React.useState(getWeatherFavs());
+  const [data,setData] = React.useState<Record<string, any>>({});
+
+  React.useEffect(()=>{
+    (async()=>{
+      const out:Record<string,any> = {};
+      for (const f of favs){
+        try{ out[f.id] = await getWeather(f.lat, f.lng); }catch{ out[f.id] = {error:true}; }
+      }
+      setData(out);
+    })();
+  },[favs]);
+
+  return (
+    <div style={{padding:12, display:"grid", gap:12}}>
+      {favs.map(f=>(
+        <div key={f.id} className="glass-card card" style={{display:"flex",gap:12,alignItems:"center"}}>
+          <div style={{flex:1}}>
+            <b>{f.name}</b><div style={{opacity:.8}}>{f.lat.toFixed(3)}, {f.lng.toFixed(3)}</div>
+          </div>
+          <div style={{textAlign:"right"}}>
+            {!data[f.id]?.error ? (
+              <>
+                <div><Icon name="device_thermostat" /> {Math.round(data[f.id]?.temp ?? data[f.id]?.main?.temp ?? 0)}°</div>
+                <div><Icon name="air" /> {Math.round(data[f.id]?.wind ?? data[f.id]?.wind?.speed ?? 0)} м/с</div>
+              </>
+            ) : <span className="badge">нет данных</span>}
+          </div>
+        </div>
+      ))}
+      {!favs.length && <div className="glass-card card">Добавляйте локации кликом на карте</div>}
+    </div>
+  );
+}
+'
+
+# PlaceDetailPage.tsx
+write_file "${FRONTEND_DIR}/src/pages/PlaceDetailPage.tsx" '
+import React from "react";
+import { getPlaceById } from "../api";
+import MediaGrid from "../components/MediaGrid";
+
+export default function PlaceDetailPage(){
+  const id = Number(window.location.pathname.split("/").pop());
+  const [data,setData] = React.useState<any|null>(null);
+  React.useEffect(()=>{ getPlaceById(id).then(setData).catch(console.error); },[id]);
+
+  if(!data) return <div style={{padding:12}}>Загрузка...</div>;
+  return (
+    <div style={{padding:12}}>
+      <div className="glass-card card">
+        <h3 style={{marginTop:0}}>{data.title||"Место"}</h3>
+        <div style={{opacity:.8, marginBottom:8}}>{data.lat?.toFixed(5)}, {data.lng?.toFixed(5)}</div>
+        <MediaGrid urls={data.photos||[]} />
+        {typeof data.catches_count==="number" && <div className="badge" style={{marginTop:8}}>Уловов: {data.catches_count}</div>}
+      </div>
+    </div>
+  );
+}
+'
+
+# ====== BACKEND: CORS фиксы (middleware + config) ======
+
+# app/Http/Middleware/CorsAll.php
+write_file "${BACKEND_DIR}/app/Http/Middleware/CorsAll.php" '
+<?php
+namespace App\Http\Middleware;
+use Closure;
+
+class CorsAll {
+  public function handle($request, Closure $next){
+    $response = $next($request);
+    $origin = $request->headers->get("Origin");
+    $allowed = env("CORS_ALLOWED_ORIGINS", "");
+    $ok = $allowed==="*" || ($origin && in_array($origin, array_map("trim", explode(",", $allowed))));
+    if ($ok) {
+      $response->headers->set("Access-Control-Allow-Origin", $origin ?: "*");
+      $response->headers->set("Vary", "Origin");
+      $response->headers->set("Access-Control-Allow-Credentials", "true");
+      $response->headers->set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+      $response->headers->set("Access-Control-Allow-Headers", "*, Authorization, Content-Type, X-Requested-With");
+    }
+    if ($request->getMethod()==="OPTIONS") {
+      $response->setStatusCode(204);
+    }
+    return $response;
+  }
+}
+'
+
+# config/cors.php
+write_file "${BACKEND_DIR}/config/cors.php" '
+<?php
+return [
+  "paths" => ["api/*", "*"],
+  "allowed_methods" => ["*"],
+  "allowed_origins" => explode(",", env("CORS_ALLOWED_ORIGINS", "https://www.fishtrackpro.ru")),
+  "allowed_headers" => ["*"],
+  "exposed_headers" => [],
+  "max_age" => 0,
+  "supports_credentials" => true,
+];
+'
+
+# Регистрация middleware в Kernel (делаем аккуратную вставку; если уже есть — ок)
+KERNEL="${BACKEND_DIR}/app/Http/Kernel.php"
+if [ -f "$KERNEL" ]; then
+  echo "→ Регистрирую CorsAll middleware"
+  if ! grep -q "App\\Http\\Middleware\\CorsAll::class" "$KERNEL"; then
+    tmp="${KERNEL}.tmp"
+    awk '
+      BEGIN{done=0}
+      /protected \$middleware\s*=\s*\[/ && !done {
+        print; print "        \\App\\Http\\Middleware\\CorsAll::class,";
+        done=1; next
+      }
+      {print}
+    ' "$KERNEL" > "$tmp" && mv "$tmp" "$KERNEL"
+  fi
+else
+  echo "⚠️ Kernel.php не найден — пропустил регистрацию."
+fi
+
+# ====== .env рекомендация ======
+ENV="${BACKEND_DIR}/.env"
+if [ -f "$ENV" ]; then
+  echo "→ Устанавливаю CORS_ALLOWED_ORIGINS в .env (если не задан)"
+  if ! grep -q "^CORS_ALLOWED_ORIGINS=" "$ENV"; then
+    echo "CORS_ALLOWED_ORIGINS=${PUBLIC_SITE}" >> "$ENV"
+  fi
+fi
+
+echo "✅ Готово. Пересобери фронт: (cd ${FRONTEND_DIR} && npm i && npm run build) и перезапусти backend."
+echo "Если CORS ещё ругается — проверь nginx headers и что API отдаёт Access-Control-Allow-Origin с правильным Origin."
