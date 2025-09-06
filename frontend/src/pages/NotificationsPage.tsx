@@ -1,22 +1,37 @@
-import React,{useEffect,useState} from 'react';
-import { notifications } from '../api';
+import React, { useEffect, useState } from 'react';
+import api from '../api';
+
+type N = { id:number|string; type:string; text:string; created_at?:string };
 
 export default function NotificationsPage(){
-  const [items,setItems]=useState<any[]>([]);
-  useEffect(()=>{ notifications().then(setItems); },[]);
+  const [list,setList] = useState<N[]>([]);
+  const [error,setError] = useState('');
+
+  useEffect(()=>{
+    (async()=>{
+      try{
+        setError('');
+        const res:any = await api.notifications();
+        const arr = Array.isArray(res?.items)?res.items : Array.isArray(res?.data)?res.data : Array.isArray(res)?res : [];
+        setList(arr);
+      }catch(e:any){
+        setError(e?.message||'Не удалось загрузить уведомления');
+      }
+    })();
+  },[]);
+
   return (
-    <div className="container" style={{padding:'12px 16px 90px'}}>
-      <h2>Уведомления</h2>
-      <div className="grid" style={{marginTop:12}}>
-        {items.map((n,i)=>(
-          <div key={i} className="glass-card card">
-            <div><b>{n.title||'—'}</b></div>
-            <div className="small">{n.body||''}</div>
-            <div className="small">{n.created_at ? new Date(n.created_at).toLocaleString() : ''}</div>
-          </div>
-        ))}
-        {!items.length && <div className="small">Пока пусто</div>}
-      </div>
+    <div className="p-3" style={{paddingBottom:80}}>
+      <div className="glass card mb-3"><strong>Уведомления</strong></div>
+      {!!error && <div className="card" style={{color:'#ff9b9b'}}>{error}</div>}
+      {list.length===0 && !error && <div className="card">Уведомлений пока нет</div>}
+      {list.map(n=>(
+        <div key={String(n.id)} className="card glass mb-2">
+          <div style={{fontWeight:600, marginBottom:4}}>{n.type}</div>
+          <div>{n.text}</div>
+          <div style={{opacity:.6, fontSize:12, marginTop:6}}>{n.created_at? new Date(n.created_at).toLocaleString() : ''}</div>
+        </div>
+      ))}
     </div>
   );
 }

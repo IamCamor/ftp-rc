@@ -1,71 +1,62 @@
-import React, {useEffect,useRef,useState} from 'react';
-import { feed } from '../api';
+import React, { useEffect, useState } from 'react';
+import api from '../api';
 import Icon from '../components/Icon';
-import Avatar from '../components/Avatar';
-import type { CatchItem } from '../types';
+
+type FeedItem = {
+  id:number;
+  user_name?:string;
+  media_url?:string;
+  caption?:string;
+  likes_count?:number;
+  comments_count?:number;
+  created_at?:string;
+};
 
 export default function FeedScreen(){
-  const [items,setItems]=useState<CatchItem[]>([]);
-  const [loading,setLoading]=useState(false);
-  const [offset,setOffset]=useState(0);
-  const ref = useRef<HTMLDivElement|null>(null);
+  const [data,setData] = useState<FeedItem[]>([]);
+  const [error,setError] = useState('');
 
-  const load = async ()=>{
-    if(loading) return;
-    setLoading(true);
-    try{
-      const data = await feed(10, offset);
-      setItems(prev => [...prev, ...data]);
-      setOffset(prev => prev + data.length);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(()=>{ load(); },[]);
   useEffect(()=>{
-    if(!ref.current) return;
-    const io = new IntersectionObserver((e)=>{
-      if(e[0].isIntersecting) load();
-    }, {rootMargin:'400px'});
-    io.observe(ref.current);
-    return ()=>io.disconnect();
-  },[ref.current]);
-
-  const open = (id: number|string)=> window.navigate?.(`/catch/${id}`);
+    (async()=>{
+      try{
+        setError('');
+        const res:any = await api.feed({limit:10, offset:0});
+        const list = Array.isArray(res?.items) ? res.items
+                   : Array.isArray(res?.data) ? res.data
+                   : Array.isArray(res) ? res : [];
+        setData(list);
+      }catch(e:any){
+        setError(e?.message||'Ошибка ленты');
+      }
+    })();
+  },[]);
 
   return (
-    <div className="container" style={{paddingBottom:90}}>
-      <div className="grid" style={{marginTop:12}}>
-        {items.map(it=>(
-          <div key={String(it.id)} className="glass-card card">
-            <div className="row" style={{justifyContent:'space-between'}}>
-              <div className="row">
-                <Avatar src={it.user_avatar}/>
-                <div>
-                  <div><b>{it.user_name||'Рыбак'}</b></div>
-                  <div className="small">{new Date(it.created_at).toLocaleString()}</div>
-                </div>
-              </div>
-              <Icon name="more" />
-            </div>
-
-            {it.media_url && (
-              <div style={{margin:'12px -2px'}}>
-                <img src={it.media_url} alt="" style={{width:'100%',borderRadius:12,border:'1px solid var(--stroke)'}} onClick={()=>open(it.id)}/>
-              </div>
-            )}
-
-            <div className="row" style={{gap:12}}>
-              <button className="badge" onClick={()=>open(it.id)}><Icon name="comment"/>{it.comments_count||0}</button>
-              <span className="badge"><Icon name="like"/>{it.likes_count||0}</span>
-              <a className="badge" onClick={()=>navigator.share?.({title:'Улов',url:location.origin+`/catch/${it.id}`})}><Icon name="share"/>Поделиться</a>
-            </div>
-          </div>
-        ))}
-        <div ref={ref} />
-        {loading && <div className="small" style={{textAlign:'center',padding:20}}>Загрузка…</div>}
+    <div className="p-3" style={{paddingBottom:80}}>
+      <div className="glass card mb-3" style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+        <strong>Лента</strong>
+        <a className="btn" href="/add-catch"><Icon name="add_photo_alternate" />&nbsp;Добавить улов</a>
       </div>
+      {!!error && <div className="card" style={{color:'#ff9b9b'}}>{error}</div>}
+      {data.map((it)=>(
+        <div key={it.id} className="card glass mb-3">
+          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
+            <div style={{width:32,height:32,borderRadius:'50%',background:'rgba(255,255,255,0.1)'}} />
+            <div style={{fontWeight:600}}>{it.user_name||'Рыбак'}</div>
+            <div style={{marginLeft:'auto', opacity:.7, fontSize:12}}>{new Date(it.created_at||Date.now()).toLocaleString()}</div>
+          </div>
+          {it.media_url && <img src={it.media_url} alt="" style={{width:'100%',borderRadius:12,objectFit:'cover',maxHeight:420}} />}
+          {it.caption && <div style={{marginTop:8}}>{it.caption}</div>}
+          <div style={{display:'flex',gap:16,marginTop:8}}>
+            <button className="btn"><Icon name="favorite" /> {it.likes_count ?? 0}</button>
+            <button className="btn"><Icon name="mode_comment" /> {it.comments_count ?? 0}</button>
+            <button className="btn"><Icon name="share" /> Поделиться</button>
+          </div>
+          <div style={{marginTop:8}}>
+            <a href={`/catch/${it.id}`}><Icon name="open_in_new" /> Открыть</a>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

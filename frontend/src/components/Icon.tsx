@@ -1,24 +1,12 @@
 import React from 'react';
-import { CONFIG, IconName } from '../config';
 
-interface Props extends React.HTMLAttributes<HTMLSpanElement>{
-  name: IconName | string;
-  className?: string;
-  fill?: 0|1;
-  size?: number; // opsz
-  weight?: number; // wght
-  grade?: number; // GRAD
-  title?: string;
-}
+type Props = { name: string; size?: number; fill?: 0|1; weight?: number; grad?: number; className?: string; style?: React.CSSProperties };
 
-export default function Icon({name,className,fill=0,size=24,weight=400,grade=0,...rest}:Props){
-  const glyph = (CONFIG.Icons as any)[name] || name;
-  const style: React.CSSProperties = {
-    fontVariationSettings: `"FILL" ${fill}, "GRAD" ${grade}, "opsz" ${size}, "wght" ${weight}`
+export default function Icon({ name, size=24, fill=0, weight=400, grad=0, className='', style }: Props) {
+  const styles: React.CSSProperties = {
+    fontVariationSettings: `'opsz' ${size}, 'wght' ${weight}, 'FILL' ${fill}, 'GRAD' ${grad}`,
+    fontSize: size,
+    ...style,
   };
-  return (
-    <span className={`material-symbols-rounded icon ${className||''}`} style={style} {...rest}>
-      {glyph}
-    </span>
-  );
+  return <span className={`material-symbols-rounded ${className}`} style={styles} aria-hidden="true">{name}</span>;
 }

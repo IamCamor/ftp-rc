@@ -16,7 +16,6 @@ type Point = {
 };
 
 const defaultCenter: [number, number] = [55.751244, 37.618423];
-
 const pinIcon = new L.Icon({
   iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
   iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
@@ -39,7 +38,6 @@ export default function MapScreen() {
   const [error, setError] = useState<string>('');
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // обеспечить высоту: 100vh - header - bottomNav
   useEffect(()=>{
     const h = window.innerHeight - UI_DIMENSIONS.header - UI_DIMENSIONS.bottomNav;
     if (containerRef.current) containerRef.current.style.height = `${Math.max(h, 320)}px`;
@@ -52,10 +50,10 @@ export default function MapScreen() {
         ? `${b.getWest().toFixed(2)},${b.getSouth().toFixed(2)},${b.getEast().toFixed(2)},${b.getNorth().toFixed(2)}`
         : undefined;
 
-      const raw = await api.points({ limit: 500, bbox });
-      const list = Array.isArray((raw as any)?.items) ? (raw as any).items
-                 : Array.isArray(raw as any) ? (raw as any)
-                 : Array.isArray((raw as any)?.data) ? (raw as any).data
+      const raw:any = await api.points({ limit: 500, bbox });
+      const list = Array.isArray(raw?.items) ? raw.items
+                 : Array.isArray(raw?.data) ? raw.data
+                 : Array.isArray(raw) ? raw
                  : [];
 
       const normalized: Point[] = list.map((p:any)=>({
@@ -76,11 +74,8 @@ export default function MapScreen() {
   };
 
   const openEntity = (p: Point) => {
-    if (p.catch_id) {
-      window.location.href = `/catch/${p.catch_id}`;
-    } else {
-      window.location.href = `/place/${p.id}`;
-    }
+    if (p.catch_id) window.location.href = `/catch/${p.catch_id}`;
+    else window.location.href = `/place/${p.id}`;
   };
 
   const addToWeather = (p: Point) => {
@@ -117,20 +112,12 @@ export default function MapScreen() {
                           key={idx}
                           src={src}
                           alt="photo"
-                          style={{
-                            cursor:'pointer',
-                            width:'100%',
-                            height:'80px',
-                            objectFit:'cover',
-                            borderRadius:'8px'
-                          } as any}
+                          style={{cursor:'pointer', width:'100%', height:'80px', objectFit:'cover', borderRadius:'8px'} as any}
                           onClick={()=>openEntity(p)}
                         />
                       ))}
                     </div>
-                  ) : (
-                    <div className="opacity-70 text-sm mb-2">Фотографий нет</div>
-                  )}
+                  ) : (<div className="opacity-70 text-sm mb-2">Фотографий нет</div>)}
 
                   <div className="mt-2 flex gap-8">
                     <button className="glass-light px-3 py-2" onClick={()=>openEntity(p)}>Открыть</button>
@@ -143,9 +130,7 @@ export default function MapScreen() {
         </MapContainer>
       </div>
 
-      {!!error && (
-        <div className="mt-3 text-red-500 text-sm">Ошибка карты: {error}</div>
-      )}
+      {!!error && <div className="mt-3 text-red-500 text-sm">Ошибка карты: {error}</div>}
     </div>
   );
 }

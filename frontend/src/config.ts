@@ -1,29 +1,11 @@
-export const CONFIG = {
-  API_BASE: (import.meta.env.VITE_API_BASE as string) || 'https://api.fishtrackpro.ru/api/v1',
-  CDN_BASE: (import.meta.env.VITE_CDN_BASE as string) || '',
-  IMAGES: {
-    logo: '/logo.svg',
-    avatarDefault: '/default-avatar.png',
-    bgPattern: '/bg-pattern.png',
-  },
-  Icons: {
-    map: 'map',
-    feed: 'dynamic_feed',
-    alerts: 'notifications',
-    profile: 'account_circle',
-    plus: 'add',
-    addCatch: 'fish',              // material symbol: "fish"
-    addPlace: 'add_location_alt',
-    like: 'favorite',
-    comment: 'forum',
-    share: 'ios_share',
-    weather: 'sunny',
-    wind: 'air',
-    temp: 'device_thermostat',
-    location: 'my_location',
-    back: 'arrow_back',
-    more: 'more_vert',
-    bookmark: 'bookmark_add',
-  } as const,
+export const API_BASE = 'https://api.fishtrackpro.ru/api'; // без /v1 — добавим в api.ts
+export const TILES_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+
+export const ICONS = {
+  // указываем имена иконок из Material Symbols Rounded
+  header: { weather: 'weather_mix', bell: 'notifications', add: 'add_circle', profile: 'account_circle' },
+  bottom: { feed: 'home', map: 'map', addCatch: 'add_photo_alternate', addPlace: 'add_location', alerts: 'notifications', profile: 'person' },
+  actions: { like: 'favorite', comment: 'mode_comment', share: 'share', open: 'open_in_new', weatherSave: 'cloud_download' },
 };
-export type IconName = keyof typeof CONFIG.Icons;
+
+export const UI_DIMENSIONS = { header: 56, bottomNav: 64 };

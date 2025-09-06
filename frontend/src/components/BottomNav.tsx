@@ -1,29 +1,28 @@
 import React from 'react';
 import Icon from './Icon';
+import { ICONS } from '../config';
 
 const items = [
-  {key:'map',   title:'Карта',  icon:'map'},
-  {key:'feed',  title:'Лента',  icon:'feed'},
-  {key:'alerts',title:'Оповещ.',icon:'alerts'},
-  {key:'profile',title:'Профиль',icon:'profile'},
-] as const;
+  { href:'/feed', label:'Лента', icon: ICONS.bottom.feed },
+  { href:'/map', label:'Карта', icon: ICONS.bottom.map },
+  { href:'/add-catch', label:'Улов', icon: ICONS.bottom.addCatch },
+  { href:'/add-place', label:'Место', icon: ICONS.bottom.addPlace },
+  { href:'/alerts', label:'Алерты', icon: ICONS.bottom.alerts },
+];
 
-export default function BottomNav({active}:{active:string}){
-  const go=(p:string)=>window.navigate?.(p);
+export default function BottomNav(){
+  const path = typeof window !== 'undefined' ? window.location.pathname : '';
   return (
-    <div className="tabs">
-      <div className="glass inner">
-        {items.map(it=>{
-          const href = '/'+it.key;
-          const isActive = active===href || (active==='/' && it.key==='map');
-          return (
-            <a key={it.key} className={`tab ${isActive?'active':''}`} onClick={()=>go(href)} style={{cursor:'pointer'}}>
-              <Icon name={it.icon}/>
-              <span>{it.title}</span>
-            </a>
-          );
-        })}
-      </div>
-    </div>
+    <nav className="bottom-nav glass">
+      {items.map(it=>{
+        const active = path===it.href;
+        return (
+          <a key={it.href} href={it.href} className={active?'active':''} aria-label={it.label}>
+            <div><Icon name={it.icon} /></div>
+            <div style={{fontSize:10, marginTop:2}}>{it.label}</div>
+          </a>
+        );
+      })}
+    </nav>
   );
 }
