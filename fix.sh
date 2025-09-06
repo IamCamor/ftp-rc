@@ -3,33 +3,14 @@ set -euo pipefail
 
 FRONT="frontend/src"
 PAGES="$FRONT/pages"
-COMP="$FRONT/components"
-UTILS="$FRONT/utils"
 STYLES="$FRONT/styles"
+UTILS="$FRONT/utils"
 
 [ -d "frontend" ] || { echo "❌ Не найдена папка frontend (запусти из корня проекта)"; exit 1; }
-
-mkdir -p "$PAGES" "$COMP" "$UTILS" "$STYLES"
-
-########################################
-# config.ts — базовая конфигурация
-########################################
-cat > "$FRONT/config.ts" <<'TS'
-const config = {
-  apiBase: (import.meta as any).env?.VITE_API_BASE || 'https://api.fishtrackpro.ru',
-  brand: {
-    name: 'FishTrack Pro',
-    // укажи ссылки на свои ассеты (https, валидные сертификаты)
-    logoUrl: '/logo.svg',
-    defaultAvatar: '/default-avatar.png',
-    bgPattern: '/bg-pattern.png',
-  }
-};
-export default config;
-TS
+mkdir -p "$PAGES" "$UTILS"
 
 ########################################
-# api.ts — нормализованные ответы + credentials
+# api.ts — фолбэки маршрутов + формы
 ########################################
 cat > "$FRONT/api.ts" <<'TS'
 import config from './config';
@@ -41,29 +22,48 @@ type FetchOpts = {
   credentials?: RequestCredentials
 };
 
-async function http<T=any>(path:string, opts:FetchOpts = {}): Promise<T> {
-  const url = path.startsWith('http') ? path : `${config.apiBase}${path}`;
-  const headers:Record<string,string> = { 'Accept':'application/json' };
-  let body: BodyInit | undefined;
-  if (opts.body !== undefined) {
-    headers['Content-Type'] = 'application/json';
-    body = JSON.stringify(opts.body);
-  }
-  const res = await fetch(url, {
-    method: opts.method ?? 'GET',
-    headers: { ...headers, ...(opts.headers ?? {}) },
-    credentials: opts.credentials ?? 'include',
-    body
-  });
+function joinUrl(base:string, path:string) {
+  if (path.startsWith('http')) return path;
+  const b = base.replace(/\/+$/,''); const p = path.replace(/^\/+/,'');
+  return `${b}/${p}`;
+}
 
-  if (res.status === 204) return undefined as unknown as T;
-  const text = await res.text();
-  let json:any; try { json = text ? JSON.parse(text) : {}; } catch { json = text; }
-  if (!res.ok) {
-    const e:any = new Error((json && (json.message || json.error)) || `HTTP ${res.status}`);
-    e.status = res.status; e.payload = json; throw e;
+async function httpRaw(url:string, opts:FetchOpts): Promise<Response> {
+  return fetch(url, {
+    method: opts.method ?? 'GET',
+    headers: opts.headers,
+    credentials: opts.credentials ?? 'include',
+    body: opts.body
+  });
+}
+
+/**
+ * Пробуем несколько префиксов:
+ *   /api/v1/xxx  → /api/xxx → /xxx
+ */
+async function httpTry<T=any>(path:string, opts:FetchOpts = {}): Promise<T> {
+  const variants = [
+    path.startsWith('/api/v1/') ? path : `/api/v1${path.startsWith('/')?path:`/${path}`}`,
+    path.startsWith('/api/') ? path : `/api${path.startsWith('/')?path:`/${path}`}`,
+    path.startsWith('/') ? path : `/${path}`,
+  ];
+
+  let lastErr:any = null;
+  for (const v of variants) {
+    try {
+      const url = joinUrl(config.apiBase, v);
+      const res = await httpRaw(url, opts);
+      const text = await res.text();
+      let json:any; try { json = text ? JSON.parse(text) : {}; } catch { json = text; }
+      if (!res.ok) { lastErr = {status:res.status, payload:json}; continue; }
+      return json as T;
+    } catch (e:any) {
+      lastErr = e;
+      continue;
+    }
   }
-  return json as T;
+  const err:any = new Error((lastErr && (lastErr.payload?.message || lastErr.payload?.error)) || 'Network/Route error');
+  err.cause = lastErr; throw err;
 }
 
 function normalizeArray(payload:any): any[] {
@@ -73,42 +73,96 @@ function normalizeArray(payload:any): any[] {
   if (Array.isArray(payload.data)) return payload.data;
   if (Array.isArray(payload.results)) return payload.results;
   if (Array.isArray(payload.rows)) return payload.rows;
-  if (typeof payload === 'object') {
-    const vals = Object.values(payload);
-    if (vals.length && vals.every(v => typeof v === 'object')) return vals as any[];
-  }
   return [];
 }
 
-// Map
 export type PointsQuery = { limit?: number; bbox?: string | [number,number,number,number]; filter?: string };
 export async function points(q: PointsQuery = {}): Promise<any[]> {
   const p = new URLSearchParams();
   if (q.limit) p.set('limit', String(q.limit));
   if (q.filter) p.set('filter', q.filter);
   if (q.bbox) p.set('bbox', Array.isArray(q.bbox) ? q.bbox.join(',') : q.bbox);
-  const res = await http<any>(`/api/v1/map/points?${p.toString()}`);
+  const res = await httpTry<any>(`/map/points?${p.toString()}`, { method:'GET' });
   return normalizeArray(res);
 }
 
-// Feed
 export async function feed(limit=10, offset=0): Promise<any[]> {
-  const res = await http<any>(`/api/v1/feed?limit=${limit}&offset=${offset}`);
+  const res = await httpTry<any>(`/feed?limit=${limit}&offset=${offset}`, { method:'GET' });
   return normalizeArray(res);
 }
 
-// Profile
 export async function profileMe(): Promise<any> {
-  return http<any>('/api/v1/profile/me');
+  return httpTry<any>('/profile/me', { method:'GET' });
 }
 
-// Notifications
 export async function notifications(): Promise<any[]> {
-  const res = await http<any>('/api/v1/notifications');
+  const res = await httpTry<any>('/notifications', { method:'GET' });
   return normalizeArray(res);
 }
 
-// Weather favs (локально)
+/** Форматируем ISO/строку в MySQL DATETIME (локально) */
+export function toMysqlDatetime(input: string|Date): string {
+  const d = typeof input === 'string' ? new Date(input) : input;
+  const pad = (n:number)=> (n<10?'0':'')+n;
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+/** submit multipart */
+async function postMultipart<T=any>(path:string, data:Record<string,any>): Promise<T> {
+  const fd = new FormData();
+  Object.entries(data).forEach(([k,v])=>{
+    if (v === undefined || v === null) return;
+    if (Array.isArray(v)) v.forEach((vv)=> fd.append(k, vv as any));
+    else fd.append(k, v as any);
+  });
+  return httpTry<T>(path, { method:'POST', body: fd, credentials:'include' });
+}
+
+/** submit json */
+async function postJson<T=any>(path:string, data:any): Promise<T> {
+  return httpTry<T>(path, { method:'POST', body: JSON.stringify(data), headers:{'Content-Type':'application/json'} });
+}
+
+/** ====== Catch ====== */
+export type CatchPayload = {
+  lat:number; lng:number;
+  species:string;
+  length?:number; weight?:number;
+  style?:string; lure?:string; tackle?:string;
+  notes?:string;
+  photo?: File|null;
+  caught_at: string; // YYYY-MM-DD HH:mm:ss
+  privacy?: 'all'|'friends'|'private';
+};
+export async function createCatch(payload: CatchPayload): Promise<any> {
+  const body:any = { ...payload };
+  if (payload.photo) body.photo = payload.photo;
+  return postMultipart('/catch', body);
+}
+
+/** ====== Place ====== */
+export type PlacePayload = {
+  title:string;
+  description?:string;
+  lat:number; lng:number;
+  water_type?: 'river'|'lake'|'sea'|'pond'|'other';
+  access?: 'free'|'paid'|'restricted';
+  season?: string;
+  tags?: string;
+  photos?: File[];
+  privacy?: 'all'|'friends'|'private';
+};
+export async function createPlace(payload: PlacePayload): Promise<any> {
+  const body:any = { ...payload };
+  if (payload.photos && payload.photos.length) {
+    body.photos = payload.photos; // backend должен принять массив
+  }
+  return postMultipart('/places', body);
+}
+export async function getPlaceById(id: string|number): Promise<any> {
+  return httpTry<any>(`/places/${id}`, { method:'GET' });
+}
+
 const LS_KEY = 'weather_favs_v1';
 export type WeatherFav = { lat:number; lng:number; name:string };
 export function getWeatherFavs(): WeatherFav[] {
@@ -118,530 +172,282 @@ export async function saveWeatherFav(f: WeatherFav): Promise<void> {
   const list = getWeatherFavs(); list.push(f);
   localStorage.setItem(LS_KEY, JSON.stringify(list));
 }
+
 TS
 
 ########################################
-# utils/leafletLoader.ts — динамическая загрузка Leaflet
+# AddCatchPage.tsx — полноценная форма
 ########################################
-cat > "$UTILS/leafletLoader.ts" <<'TS'
-let loading: Promise<any> | null = null;
-export async function loadLeaflet(): Promise<any> {
-  if ((window as any).L) return (window as any).L;
-  if (!loading) {
-    loading = new Promise((resolve, reject) => {
-      const css = document.createElement('link');
-      css.rel = 'stylesheet';
-      css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-      css.onload = () => {};
-      css.onerror = reject;
-      document.head.appendChild(css);
-
-      const s = document.createElement('script');
-      s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-      s.async = true;
-      s.onload = () => resolve((window as any).L);
-      s.onerror = reject;
-      document.body.appendChild(s);
-    });
-  }
-  return loading;
-}
-TS
-
-########################################
-# styles/app.css — glassmorphism + Material Symbols
-########################################
-cat > "$STYLES/app.css" <<'CSS'
-/* Material Symbols (Rounded) */
-@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded');
-
-/* базовые */
-:root {
-  --bg: #0b1220;
-  --glass: rgba(255,255,255,0.08);
-  --glass-border: rgba(255,255,255,0.18);
-  --text: #e8eefc;
-  --muted: #a6b0c2;
-  --brand: #4da3ff;
-}
-* { box-sizing: border-box; }
-html, body, #root { height:100%; }
-body { margin:0; background: radial-gradient(1000px 600px at 20% 0%, #0f1a32 0, var(--bg) 60%); color: var(--text); font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-
-.container { width:100%; max-width: 960px; margin: 0 auto; padding: 12px; }
-
-.glass {
-  backdrop-filter: blur(12px);
-  background: var(--glass);
-  border: 1px solid var(--glass-border);
-  border-radius: 18px;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.25);
-}
-.card { padding: 12px; }
-
-.btn {
-  display:inline-flex; align-items:center; gap:8px;
-  padding: 10px 14px; border-radius: 12px; border: 1px solid var(--glass-border);
-  background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04));
-  color: var(--text); text-decoration:none; cursor:pointer;
-}
-.btn:hover { border-color: #ffffff55; }
-.subtle { color: var(--muted); }
-
-.icon, .material-symbols-rounded {
-  font-family: "Material Symbols Rounded";
-  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
-  font-style: normal; font-weight: normal; font-size: 20px; line-height: 1;
-}
-
-/* Header / BottomNav */
-.header { position: sticky; top:0; z-index: 20; padding: 8px 12px; display:flex; gap:8px; align-items:center; justify-content:space-between; }
-.brand { display:flex; gap:10px; align-items:center; }
-.brand img { width:28px; height:28px; border-radius:8px; }
-.nav-actions { display:flex; gap:8px; align-items:center; }
-
-.bottom-nav {
-  position: sticky; bottom:0; z-index: 20; margin: 10px; padding: 6px;
-  display:flex; justify-content:space-around; align-items:center;
-}
-
-/* Map */
-.map-wrap { position: relative; height: calc(100vh - 120px); margin: 10px; }
-#map { position:absolute; inset:0; border-radius: 16px; }
-.fab { position: absolute; right: 12px; bottom: 12px; display:flex; flex-direction:column; gap:8px; }
-.leaflet-container { border-radius: 16px; }
-
-/* Feed list */
-.list { display:grid; gap:10px; margin: 10px; }
-.item { padding: 10px; display:flex; gap:12px; }
-.item img.thumb { width:84px; height:84px; object-fit:cover; border-radius: 12px; }
-.item .meta { display:flex; flex-direction:column; gap:6px; }
-.item .meta .title { font-weight:600; }
-
-/* links reset */
-a { color: var(--brand); }
-a.btn { color: var(--text); }
-CSS
-
-########################################
-# components/Header.tsx — default export
-########################################
-cat > "$COMP/Header.tsx" <<'TS'
-import React from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import config from '../config';
-
-const Header: React.FC = () => {
-  const loc = useLocation();
-  return (
-    <div className="header glass">
-      <div className="brand">
-        <img src={config.brand.logoUrl} alt="logo"/>
-        <strong>{config.brand.name}</strong>
-      </div>
-      <div className="nav-actions">
-        <Link className="btn" to="/weather" title="Погода">
-          <span className="material-symbols-rounded">sunny</span>
-        </Link>
-        <Link className="btn" to="/alerts" title="Уведомления">
-          <span className="material-symbols-rounded">notifications</span>
-        </Link>
-        <Link className="btn" to="/profile" title="Профиль">
-          <span className="material-symbols-rounded">account_circle</span>
-        </Link>
-      </div>
-    </div>
-  );
-};
-export default Header;
-TS
-
-########################################
-# components/BottomNav.tsx — default export
-########################################
-cat > "$COMP/BottomNav.tsx" <<'TS'
-import React from 'react';
-import { Link, useLocation } from 'react-router-dom';
-
-const Tab:React.FC<{to:string; icon:string; title:string}> = ({to, icon, title}) => {
-  const loc = useLocation();
-  const active = loc.pathname === to || (to !== '/' && loc.pathname.startsWith(to));
-  return (
-    <Link className="btn" to={to} title={title} style={{opacity: active ? 1 : 0.65}}>
-      <span className="material-symbols-rounded">{icon}</span>
-      <span style={{marginLeft:6}}>{title}</span>
-    </Link>
-  );
-};
-
-const BottomNav: React.FC = () => {
-  return (
-    <div className="bottom-nav glass">
-      <Tab to="/feed" icon="home" title="Лента" />
-      <Tab to="/map" icon="map" title="Карта" />
-      <Tab to="/add/catch" icon="add_circle" title="Улов" />
-      <Tab to="/add/place" icon="add_location_alt" title="Место" />
-    </div>
-  );
-};
-export default BottomNav;
-TS
-
-########################################
-# AppRoot.tsx — BrowserRouter + маршруты
-########################################
-cat > "$FRONT/AppRoot.tsx" <<'TS'
-import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-
-import Header from './components/Header';
-import BottomNav from './components/BottomNav';
-
-import FeedScreen from './pages/FeedScreen';
-import MapScreen from './pages/MapScreen';
-import AddCatchPage from './pages/AddCatchPage';
-import AddPlacePage from './pages/AddPlacePage';
-import NotificationsPage from './pages/NotificationsPage';
-import ProfilePage from './pages/ProfilePage';
-import WeatherPage from './pages/WeatherPage';
-import CatchDetailPage from './pages/CatchDetailPage';
-import PlaceDetailPage from './pages/PlaceDetailPage';
-import NotFound from './pages/NotFound';
-
-const AppRoot: React.FC = () => (
-  <BrowserRouter>
-    <Header />
-    <Routes>
-      <Route path="/" element={<Navigate to="/feed" replace />} />
-      <Route path="/feed" element={<FeedScreen />} />
-      <Route path="/map" element={<MapScreen />} />
-      <Route path="/add/catch" element={<AddCatchPage />} />
-      <Route path="/add/place" element={<AddPlacePage />} />
-      <Route path="/alerts" element={<NotificationsPage />} />
-      <Route path="/profile" element={<ProfilePage />} />
-      <Route path="/weather" element={<WeatherPage />} />
-      <Route path="/catch/:id" element={<CatchDetailPage />} />
-      <Route path="/place/:id" element={<PlaceDetailPage />} />
-      <Route path="*" element={<NotFound />} />
-    </Routes>
-    <BottomNav />
-  </BrowserRouter>
-);
-export default AppRoot;
-TS
-
-########################################
-# main.tsx — точка входа
-########################################
-cat > "$FRONT/main.tsx" <<'TS'
-import React from 'react';
-import { createRoot } from 'react-dom/client';
-import './styles/app.css';
-import AppRoot from './AppRoot';
-
-const el = document.getElementById('root');
-if (!el) throw new Error('#root not found');
-createRoot(el).render(<AppRoot />);
-console.log('[boot] App mounted');
-TS
-
-########################################
-# pages/NotFound.tsx
-########################################
-cat > "$PAGES/NotFound.tsx" <<'TS'
-import React from 'react';
-import { Link } from 'react-router-dom';
-const NotFound:React.FC = () => (
-  <div className="container">
-    <div className="glass card" style={{marginTop:16}}>
-      <h2>404 — не найдено</h2>
-      <p className="subtle">Проверьте адрес или вернитесь на главные разделы.</p>
-      <div style={{display:'flex',gap:8}}>
-        <Link className="btn" to="/feed"><span className="material-symbols-rounded">home</span>Лента</Link>
-        <Link className="btn" to="/map"><span className="material-symbols-rounded">map</span>Карта</Link>
-      </div>
-    </div>
-  </div>
-);
-export default NotFound;
-TS
-
-########################################
-# pages/MapScreen.tsx — рабочая карта + пины + fav погоды
-########################################
-cat > "$PAGES/MapScreen.tsx" <<'TS'
-import React, { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { points, saveWeatherFav } from '../api';
-import { loadLeaflet } from '../utils/leafletLoader';
-
-type Point = { id: number|string; lat:number; lng:number; type?:'place'|'catch'|string; title?:string; species?:string; media?:string[]; photo_url?:string; };
-
-const DEFAULT_CENTER:[number,number] = [55.75, 37.61];
-const DEFAULT_ZOOM = 10;
-
-const MapScreen:React.FC = () => {
-  const nav = useNavigate();
-  const mapEl = useRef<HTMLDivElement|null>(null);
-  const mapRef = useRef<any>(null);
-  const [ready, setReady] = useState(false);
-
-  useEffect(() => {
-    let canceled = false;
-    (async () => {
-      const L = await loadLeaflet();
-      if (canceled) return;
-      const map = L.map(mapEl.current!).setView(DEFAULT_CENTER, DEFAULT_ZOOM);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19, attribution:'&copy; OpenStreetMap'}).addTo(map);
-      mapRef.current = map; setReady(true);
-
-      map.on('click', async (e:any) => {
-        const lat = e.latlng.lat, lng = e.latlng.lng;
-        const m = L.marker([lat,lng]).addTo(map);
-        m.bindPopup(`
-          <div style="padding:6px;min-width:220px">
-            <b>Новая точка</b><br/>${lat.toFixed(5)}, ${lng.toFixed(5)}<br/><br/>
-            <button id="btnAddPlace" style="padding:6px 10px;border-radius:10px;border:1px solid #fff3;background:#ffffff14;color:#fff">Добавить место</button>
-            <button id="btnSaveWeather" style="padding:6px 10px;border-radius:10px;border:1px solid #fff3;background:#ffffff14;color:#fff;margin-left:6px">В погоду</button>
-          </div>
-        `).openPopup();
-        setTimeout(() => {
-          document.getElementById('btnAddPlace')?.addEventListener('click', () => nav(`/add/place?lat=${lat}&lng=${lng}`), { once:true });
-          document.getElementById('btnSaveWeather')?.addEventListener('click', async () => {
-            await saveWeatherFav({ lat, lng, name:`Точка ${lat.toFixed(3)},${lng.toFixed(3)}` });
-            alert('Сохранено в избранные точки погоды');
-          }, { once:true });
-        }, 0);
-      });
-    })();
-    return () => { canceled = true; try { mapRef.current?.remove(); } catch {} };
-  }, [nav]);
-
-  useEffect(() => {
-    if (!ready) return;
-    (async () => {
-      try {
-        const L = (window as any).L;
-        const raw = await points({ limit: 500 });
-        const list: Point[] = Array.isArray(raw) ? raw : [];
-        list.forEach(p => {
-          const m = L.marker([p.lat, p.lng]).addTo(mapRef.current);
-          const img = (p.media && p.media[0]) || p.photo_url || '';
-          const title = (p.title || p.species || 'Точка').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-          const href = p.type === 'catch' ? `/catch/${p.id}` : `/place/${p.id}`;
-          const html = `
-            <div style="min-width:220px">
-              ${img ? `<img src="${img}" style="width:100%;height:120px;object-fit:cover;border-radius:10px;margin-bottom:6px" />` : ''}
-              <div style="font-weight:600;margin-bottom:6px">${title}</div>
-              <a href="${href}" class="leaflet-popup-link">Открыть</a>
-            </div>`;
-          m.bindPopup(html);
-          m.on('popupopen', () => {
-            const a = document.querySelector('.leaflet-popup a.leaflet-popup-link') as HTMLAnchorElement | null;
-            a?.addEventListener('click', (ev) => { ev.preventDefault(); nav(a.getAttribute('href') || '/'); }, { once:true });
-          });
-        });
-      } catch (e) {
-        console.error('points load error', e);
-      }
-    })();
-  }, [ready, nav]);
-
-  return (
-    <div className="map-wrap">
-      <div id="map" ref={mapEl} className="glass" />
-      <div className="fab">
-        <button className="btn" onClick={() => nav('/add/place')}><span className="material-symbols-rounded">add_location_alt</span>Место</button>
-        <button className="btn" onClick={() => nav('/add/catch')}><span className="material-symbols-rounded">add_circle</span>Улов</button>
-      </div>
-    </div>
-  );
-};
-export default MapScreen;
-TS
-
-########################################
-# Простые рабочие версии остальных страниц — с default export
-########################################
-cat > "$PAGES/FeedScreen.tsx" <<'TS'
-import React, { useEffect, useState } from 'react';
-import { feed } from '../api';
-import { Link } from 'react-router-dom';
-
-const FeedScreen:React.FC = () => {
-  const [items, setItems] = useState<any[]>([]);
-  const [err, setErr] = useState<string>('');
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const data = await feed(10,0);
-        setItems(Array.isArray(data)?data:[]);
-      } catch (e:any) {
-        setErr(e?.message || 'Ошибка загрузки');
-      }
-    })();
-  }, []);
-
-  return (
-    <div className="list">
-      {err && <div className="glass card">{err}</div>}
-      {items.map((it:any) => (
-        <Link to={(it.type==='catch'?`/catch/${it.id}`:`/place/${it.id}`)} key={`f-${it.id}`} className="glass item">
-          <img className="thumb" src={it.photo_url || (it.media && it.media[0]) || ''} alt="" />
-          <div className="meta">
-            <div className="title">{it.title || it.species || 'Публикация'}</div>
-            <div className="subtle">{new Date(it.created_at || Date.now()).toLocaleString()}</div>
-          </div>
-        </Link>
-      ))}
-      {!items.length && !err && <div className="glass card">Пока пусто.</div>}
-    </div>
-  );
-};
-export default FeedScreen;
-TS
-
 cat > "$PAGES/AddCatchPage.tsx" <<'TS'
-import React from 'react';
+import React, { useState } from 'react';
+import { createCatch, toMysqlDatetime } from '../api';
+import { useNavigate } from 'react-router-dom';
+
 const AddCatchPage:React.FC = () => {
+  const nav = useNavigate();
+  const qs = new URLSearchParams(location.search);
+  const [lat, setLat] = useState<number>(Number(qs.get('lat')) || 55.75);
+  const [lng, setLng] = useState<number>(Number(qs.get('lng')) || 37.61);
+  const [species, setSpecies] = useState('');
+  const [length, setLength] = useState<number|''>('');
+  const [weight, setWeight] = useState<number|''>('');
+  const [style, setStyle] = useState('');
+  const [lure, setLure] = useState('');
+  const [tackle, setTackle] = useState('');
+  const [notes, setNotes] = useState('');
+  const [photo, setPhoto] = useState<File|null>(null);
+  const [caughtAt, setCaughtAt] = useState<string>(new Date().toISOString().slice(0,16)); // yyyy-MM-ddTHH:mm
+  const [privacy, setPrivacy] = useState<'all'|'friends'|'private'>('all');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string>('');
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!species.trim()) { setMsg('Укажите вид рыбы'); return; }
+    setBusy(true); setMsg('');
+    try {
+      const payload = {
+        lat, lng, species,
+        length: length === '' ? undefined : Number(length),
+        weight: weight === '' ? undefined : Number(weight),
+        style, lure, tackle, notes,
+        photo,
+        caught_at: toMysqlDatetime(new Date(caughtAt)),
+        privacy
+      };
+      const res = await createCatch(payload);
+      setMsg('✅ Улов добавлен');
+      const id = res?.id;
+      setTimeout(()=> nav(id ? `/catch/${id}` : '/feed'), 600);
+    } catch (e:any) {
+      setMsg(`Ошибка: ${e?.message || 'не удалось отправить'}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="container">
-      <div className="glass card" style={{marginTop:16}}>
+      <form className="glass card" style={{marginTop:16}} onSubmit={submit}>
         <h2>Добавить улов</h2>
-        <p className="subtle">Форма в разработке — поля будут расширены по ТЗ.</p>
-      </div>
+        {msg && <div className="subtle" style={{marginBottom:8}}>{msg}</div>}
+        <div style={{display:'grid', gap:10}}>
+          <label>Вид рыбы* <input value={species} onChange={e=>setSpecies(e.target.value)} required/></label>
+          <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10}}>
+            <label>Длина (см) <input type="number" step="0.1" value={length} onChange={e=>setLength(e.target.value===''?'':Number(e.target.value))} /></label>
+            <label>Вес (кг) <input type="number" step="0.01" value={weight} onChange={e=>setWeight(e.target.value===''?'':Number(e.target.value))} /></label>
+          </div>
+          <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10}}>
+            <label>Метод <input value={style} onChange={e=>setStyle(e.target.value)} /></label>
+            <label>Приманка <input value={lure} onChange={e=>setLure(e.target.value)} /></label>
+          </div>
+          <label>Снасть <input value={tackle} onChange={e=>setTackle(e.target.value)} /></label>
+          <label>Заметки <textarea value={notes} onChange={e=>setNotes(e.target.value)} rows={3} /></label>
+
+          <label>Фото
+            <input type="file" accept="image/*" onChange={e=>setPhoto(e.target.files?.[0] || null)} />
+          </label>
+
+          <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10}}>
+            <label>Широта <input type="number" step="0.00001" value={lat} onChange={e=>setLat(Number(e.target.value))} /></label>
+            <label>Долгота <input type="number" step="0.00001" value={lng} onChange={e=>setLng(Number(e.target.value))} /></label>
+          </div>
+
+          <label>Дата/время
+            <input type="datetime-local" value={caughtAt} onChange={e=>setCaughtAt(e.target.value)} />
+          </label>
+
+          <label>Приватность
+            <select value={privacy} onChange={e=>setPrivacy(e.target.value as any)}>
+              <option value="all">Все</option>
+              <option value="friends">Друзья</option>
+              <option value="private">Только я</option>
+            </select>
+          </label>
+
+          <div style={{display:'flex', gap:8}}>
+            <button className="btn" disabled={busy} type="submit">
+              <span className="material-symbols-rounded">save</span> Сохранить
+            </button>
+            <button className="btn" type="button" onClick={()=>history.back()}><span className="material-symbols-rounded">arrow_back</span>Назад</button>
+          </div>
+        </div>
+      </form>
     </div>
   );
 };
 export default AddCatchPage;
 TS
 
+########################################
+# AddPlacePage.tsx — полноценная форма
+########################################
 cat > "$PAGES/AddPlacePage.tsx" <<'TS'
-import React from 'react';
+import React, { useState } from 'react';
+import { createPlace } from '../api';
+import { useNavigate } from 'react-router-dom';
+
 const AddPlacePage:React.FC = () => {
-  const params = new URLSearchParams(location.search);
-  const lat = params.get('lat'); const lng = params.get('lng');
+  const nav = useNavigate();
+  const qs = new URLSearchParams(location.search);
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [lat, setLat] = useState<number>(Number(qs.get('lat')) || 55.75);
+  const [lng, setLng] = useState<number>(Number(qs.get('lng')) || 37.61);
+  const [waterType, setWaterType] = useState<'river'|'lake'|'sea'|'pond'|'other'>('river');
+  const [access, setAccess] = useState<'free'|'paid'|'restricted'>('free');
+  const [season, setSeason] = useState('');
+  const [tags, setTags] = useState('');
+  const [photos, setPhotos] = useState<File[]>([]);
+  const [privacy, setPrivacy] = useState<'all'|'friends'|'private'>('all');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!title.trim()) { setMsg('Название обязательно'); return; }
+    setBusy(true); setMsg('');
+    try {
+      const res = await createPlace({
+        title, description, lat, lng,
+        water_type: waterType, access, season, tags,
+        photos, privacy
+      });
+      setMsg('✅ Место добавлено');
+      const id = res?.id;
+      setTimeout(()=> nav(id ? `/place/${id}` : '/map'), 600);
+    } catch (e:any) {
+      setMsg(`Ошибка: ${e?.message || 'не удалось отправить'}`);
+    } finally { setBusy(false); }
+  }
+
   return (
     <div className="container">
-      <div className="glass card" style={{marginTop:16}}>
+      <form className="glass card" style={{marginTop:16}} onSubmit={submit}>
         <h2>Добавить место</h2>
-        {lat && lng && <p className="subtle">Координаты: {lat}, {lng}</p>}
-        <p className="subtle">Форма в разработке — заполним по ТЗ (название, описание, фото и т.д.).</p>
-      </div>
+        {msg && <div className="subtle" style={{marginBottom:8}}>{msg}</div>}
+        <div style={{display:'grid', gap:10}}>
+          <label>Название* <input value={title} onChange={e=>setTitle(e.target.value)} required/></label>
+          <label>Описание <textarea rows={3} value={description} onChange={e=>setDescription(e.target.value)} /></label>
+
+          <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10}}>
+            <label>Широта <input type="number" step="0.00001" value={lat} onChange={e=>setLat(Number(e.target.value))} /></label>
+            <label>Долгота <input type="number" step="0.00001" value={lng} onChange={e=>setLng(Number(e.target.value))} /></label>
+          </div>
+
+          <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10}}>
+            <label>Водоём
+              <select value={waterType} onChange={e=>setWaterType(e.target.value as any)}>
+                <option value="river">Река</option>
+                <option value="lake">Озеро</option>
+                <option value="sea">Море</option>
+                <option value="pond">Пруд</option>
+                <option value="other">Другое</option>
+              </select>
+            </label>
+            <label>Доступ
+              <select value={access} onChange={e=>setAccess(e.target.value as any)}>
+                <option value="free">Свободный</option>
+                <option value="paid">Платный</option>
+                <option value="restricted">Ограниченный</option>
+              </select>
+            </label>
+          </div>
+
+          <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10}}>
+            <label>Сезон/период <input value={season} onChange={e=>setSeason(e.target.value)} placeholder="весна, лето…"/></label>
+            <label>Теги <input value={tags} onChange={e=>setTags(e.target.value)} placeholder="окунь, лодка…"/></label>
+          </div>
+
+          <label>Фото
+            <input multiple type="file" accept="image/*" onChange={e=>setPhotos(Array.from(e.target.files || []))} />
+          </label>
+
+          <label>Приватность
+            <select value={privacy} onChange={e=>setPrivacy(e.target.value as any)}>
+              <option value="all">Все</option>
+              <option value="friends">Друзья</option>
+              <option value="private">Только я</option>
+            </select>
+          </label>
+
+          <div style={{display:'flex', gap:8}}>
+            <button className="btn" disabled={busy} type="submit">
+              <span className="material-symbols-rounded">save</span> Сохранить
+            </button>
+            <button className="btn" type="button" onClick={()=>history.back()}><span className="material-symbols-rounded">arrow_back</span>Назад</button>
+          </div>
+        </div>
+      </form>
     </div>
   );
 };
 export default AddPlacePage;
 TS
 
-cat > "$PAGES/NotificationsPage.tsx" <<'TS'
-import React, { useEffect, useState } from 'react';
-import { notifications } from '../api';
-
-const NotificationsPage:React.FC = () => {
-  const [items, setItems] = useState<any[]>([]);
-  const [err, setErr] = useState('');
-  useEffect(() => {
-    (async () => {
-      try { setItems(await notifications()); } catch (e:any) { setErr(e?.message || 'Ошибка'); }
-    })();
-  }, []);
-  return (
-    <div className="container">
-      <div className="glass card" style={{marginTop:16}}>
-        <h2>Уведомления</h2>
-        {err && <div className="subtle">{err}</div>}
-        {!items.length && !err && <div className="subtle">Пока нет уведомлений</div>}
-        <ul>
-          {items.map((n:any, i:number) => <li key={i}>{n.title || n.text || 'Уведомление'}</li>)}
-        </ul>
-      </div>
-    </div>
-  );
-};
-export default NotificationsPage;
-TS
-
-cat > "$PAGES/ProfilePage.tsx" <<'TS'
-import React, { useEffect, useState } from 'react';
-import { profileMe } from '../api';
-import config from '../config';
-
-const ProfilePage:React.FC = () => {
-  const [me, setMe] = useState<any>(null);
-  const [err, setErr] = useState('');
-  useEffect(() => { (async ()=>{ try { setMe(await profileMe()); } catch(e:any){ setErr(e?.message||'Ошибка'); }})(); }, []);
-  return (
-    <div className="container">
-      <div className="glass card" style={{marginTop:16}}>
-        <h2>Профиль</h2>
-        {err && <div className="subtle">{err}</div>}
-        {me ? (
-          <div style={{display:'flex',gap:12,alignItems:'center'}}>
-            <img src={me.avatar || config.brand.defaultAvatar} alt="" style={{width:72,height:72,borderRadius:16,objectFit:'cover'}}/>
-            <div>
-              <div style={{fontWeight:600}}>{me.name || 'Без имени'}</div>
-              <div className="subtle">Бонусы: {me.bonus_balance ?? 0}</div>
-            </div>
-          </div>
-        ) : !err && <div className="subtle">Загрузка…</div>}
-      </div>
-    </div>
-  );
-};
-export default ProfilePage;
-TS
-
-cat > "$PAGES/WeatherPage.tsx" <<'TS'
-import React, { useMemo } from 'react';
-import { getWeatherFavs } from '../api';
-import { Link } from 'react-router-dom';
-
-const WeatherPage:React.FC = () => {
-  const favs = useMemo(() => getWeatherFavs(), []);
-  return (
-    <div className="container">
-      <div className="glass card" style={{marginTop:16}}>
-        <h2>Погода</h2>
-        {!favs.length && <div className="subtle">Добавьте точку на карте (клик по карте → «В погоду»), и она появится здесь.</div>}
-        <ul>
-          {favs.map((f,i) => (
-            <li key={i}>
-              {f.name} — <Link to={`/map`}>на карте</Link>
-            </li>
-          ))}
-        </ul>
-      </div>
-    </div>
-  );
-};
-export default WeatherPage;
-TS
-
-cat > "$PAGES/CatchDetailPage.tsx" <<'TS'
-import React from 'react';
-const CatchDetailPage:React.FC = () => {
-  return (
-    <div className="container">
-      <div className="glass card" style={{marginTop:16}}>
-        <h2>Улов</h2>
-        <div className="subtle">Детальная страница улова (рендер данных — после интеграции API).</div>
-      </div>
-    </div>
-  );
-};
-export default CatchDetailPage;
-TS
-
+########################################
+# PlaceDetailPage.tsx — детальная страница
+########################################
 cat > "$PAGES/PlaceDetailPage.tsx" <<'TS'
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { useParams, Link } from 'react-router-dom';
+import { getPlaceById } from '../api';
+
 const PlaceDetailPage:React.FC = () => {
-  return (
+  const { id } = useParams();
+  const [data, setData] = useState<any>(null);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    (async() => {
+      try { setData(await getPlaceById(id!)); }
+      catch(e:any){ setErr(e?.message || 'Ошибка загрузки'); }
+    })();
+  }, [id]);
+
+  if (err) return (
     <div className="container">
       <div className="glass card" style={{marginTop:16}}>
         <h2>Место</h2>
-        <div className="subtle">Детальная страница места (рендер данных — после интеграции API).</div>
+        <div className="subtle">{err}</div>
+      </div>
+    </div>
+  );
+
+  if (!data) return (
+    <div className="container">
+      <div className="glass card" style={{marginTop:16}}>
+        <h2>Место</h2>
+        <div className="subtle">Загрузка…</div>
+      </div>
+    </div>
+  );
+
+  const photos:string[] = data.photos || data.media || (data.photo_url ? [data.photo_url] : []) || [];
+
+  return (
+    <div className="container">
+      <div className="glass card" style={{marginTop:16}}>
+        <h2>{data.title || 'Место'}</h2>
+        {photos.length > 0 && (
+          <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))', gap:8, margin:'8px 0'}}>
+            {photos.map((src:string, i:number)=> (
+              <img key={i} src={src} alt="" style={{width:'100%', height:120, objectFit:'cover', borderRadius:12}}/>
+            ))}
+          </div>
+        )}
+        <div className="subtle" style={{margin:'8px 0'}}>
+          {data.description || 'Нет описания'}
+        </div>
+        <div style={{display:'flex', gap:12, flexWrap:'wrap', marginTop:6}}>
+          <span className="subtle"><span className="material-symbols-rounded">location_on</span> {data.lat?.toFixed?.(5)}, {data.lng?.toFixed?.(5)}</span>
+          {data.water_type && <span className="subtle"><span className="material-symbols-rounded">waves</span> {data.water_type}</span>}
+          {data.access && <span className="subtle"><span className="material-symbols-rounded">lock_open</span> {data.access}</span>}
+        </div>
+        <div style={{display:'flex', gap:8, marginTop:12}}>
+          <Link to="/map" className="btn"><span className="material-symbols-rounded">map</span> На карту</Link>
+          <Link to="/feed" className="btn"><span className="material-symbols-rounded">home</span> В ленту</Link>
+        </div>
       </div>
     </div>
   );
@@ -649,31 +455,10 @@ const PlaceDetailPage:React.FC = () => {
 export default PlaceDetailPage;
 TS
 
-echo "✅ Обновлены/созданы файлы:"
-echo " - $FRONT/config.ts"
+echo "✅ Обновлены:"
 echo " - $FRONT/api.ts"
-echo " - $UTILS/leafletLoader.ts"
-echo " - $STYLES/app.css"
-echo " - $COMP/Header.tsx"
-echo " - $COMP/BottomNav.tsx"
-echo " - $FRONT/AppRoot.tsx"
-echo " - $FRONT/main.tsx"
-echo " - $PAGES/NotFound.tsx"
-echo " - $PAGES/MapScreen.tsx"
-echo " - $PAGES/FeedScreen.tsx"
 echo " - $PAGES/AddCatchPage.tsx"
 echo " - $PAGES/AddPlacePage.tsx"
-echo " - $PAGES/NotificationsPage.tsx"
-echo " - $PAGES/ProfilePage.tsx"
-echo " - $PAGES/WeatherPage.tsx"
-echo " - $PAGES/CatchDetailPage.tsx"
 echo " - $PAGES/PlaceDetailPage.tsx"
-
 echo
-echo "Дальше:"
-echo " 1) cd frontend"
-echo " 2) npm run dev   — для локальной проверки"
-echo "    или npm run build и задеплоить статику"
-echo
-echo "Важно для прод-сервера (Nginx):"
-echo "  location / { try_files \$uri \$uri/ /index.html; }"
+echo "Готово. Запусти: cd frontend && npm run dev   (или npm run build)"
