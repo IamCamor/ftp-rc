@@ -1,139 +1,94 @@
-import cfgDefault, { config as cfgNamed } from './config';
+import config from './config';
 
-const cfg = (cfgNamed ?? cfgDefault);
+type FetchOpts = { method?: 'GET'|'POST'|'PUT'|'DELETE'; body?: any; headers?: Record<string,string>; credentials?: RequestCredentials };
 
-/** Базовый fetch с общими заголовками/куками и автообработкой ошибок */
-async function http<T = any>(path: string, init: RequestInit = {}): Promise<T> {
-  const base = cfg.apiBase?.replace(/\/+$/,'') || '';
-  const url  = `${base}${path.startsWith('/') ? '' : '/'}${path}`;
-  const headers: HeadersInit = {
-    Accept: 'application/json',
-    ...(init.body ? {'Content-Type':'application/json'} : {}),
-    ...(init.headers || {}),
-  };
+async function http<T = any>(path: string, opts: FetchOpts = {}): Promise<T> {
+  const url = path.startsWith('http') ? path : `${config.apiBase}${path}`;
+  const headers: Record<string,string> = { 'Accept': 'application/json' };
+  let body: BodyInit | undefined;
+
+  if (opts.body !== undefined) {
+    headers['Content-Type'] = 'application/json';
+    body = JSON.stringify(opts.body);
+  }
+
   const res = await fetch(url, {
-    method: init.method ?? 'GET',
-    credentials: 'include',             // важно для сессии
-    headers,
-    body: init.body as any,
+    method: opts.method ?? 'GET',
+    headers: { ...headers, ...(opts.headers ?? {}) },
+    credentials: 'include', // чтобы работали куки/сессии
+    body
   });
 
-  // Иногда бек может прислать 204 без тела
-  if (res.status === 204) return undefined as any;
+  // Некоторые наши ручки возвращают 204 без body
+  if (res.status === 204) return undefined as unknown as T;
 
-  let data: any = null;
   const text = await res.text();
-  try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+  let json: any;
+  try { json = text ? JSON.parse(text) : {}; } catch { json = text; }
 
   if (!res.ok) {
-    const msg = (data && (data.message || data.error)) || res.statusText;
-    const err: any = new Error(`HTTP ${res.status}: ${msg}`);
-    err.status = res.status;
-    err.data = data;
-    throw err;
+    const e: any = new Error((json && (json.message || json.error)) || `HTTP ${res.status}`);
+    e.status = res.status; e.payload = json;
+    throw e;
   }
-  return data as T;
+  return json as T;
 }
 
-/** Лента */
-export async function feed(params: { limit?: number; offset?: number } = {}) {
-  const q = new URLSearchParams();
-  if (params.limit  != null) q.set('limit',  String(params.limit));
-  if (params.offset != null) q.set('offset', String(params.offset));
-  return http<{ items: any[]; nextOffset?: number }>(`/feed?${q.toString()}`);
-}
+export type PointsQuery = { limit?: number; bbox?: string | [number,number,number,number]; filter?: string };
 
-/** Точки карты */
-export async function points(params: { limit?: number; bbox?: string; filter?: string } = {}) {
-  const q = new URLSearchParams();
-  if (params.limit  != null) q.set('limit',  String(params.limit));
-  if (params.bbox)           q.set('bbox',   params.bbox);
-  if (params.filter)         q.set('filter', params.filter);
-  return http<any[]>(`/map/points?${q.toString()}`);
-}
-
-/** Профиль */
-export async function getProfile() {
-  return http(`/profile/me`);
-}
-
-/** Уведомления */
-export async function getNotifications() {
-  return http<any[]>(`/notifications`);
-}
-
-/** Деталь улова */
-export async function getCatchById(id: string|number) {
-  return http(`/catch/${id}`);
-}
-
-/** Комментарий к улову */
-export async function addComment(catchId: string|number, payload: { text: string }) {
-  return http(`/catch/${catchId}/comments`, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
-}
-
-/** Создать место */
-export async function addPlace(payload: {
-  lat: number; lng: number; title: string; description?: string; photos?: string[];
-}) {
-  return http(`/points`, { method:'POST', body: JSON.stringify(payload) });
-}
-
-/** Создать улов */
-export async function addCatch(payload: {
-  lat: number; lng: number; species?: string; length?: number; weight?: number;
-  method?: string; bait?: string; gear?: string; caption?: string; photo_url?: string;
-  caught_at?: string; privacy?: 'all'|'friends'|'private';
-}) {
-  return http(`/catch`, { method:'POST', body: JSON.stringify(payload) });
-}
-
-/** Избранные погодные точки (храним на бек/или локально — фронт прозрачен) */
-export async function getWeatherFavs() {
-  try {
-    return await http<{ id:string; lat:number; lng:number; name:string }[]>(`/weather/favs`);
-  } catch (e:any) {
-    // fallback на localStorage, если ендпоинта нет
-    const raw = localStorage.getItem('weather_favs') || '[]';
-    return JSON.parse(raw);
+function normalizeArray(payload: any): any[] {
+  if (Array.isArray(payload)) return payload;
+  if (payload == null) return [];
+  if (Array.isArray(payload.items)) return payload.items;
+  if (Array.isArray(payload.data)) return payload.data;
+  if (Array.isArray(payload.results)) return payload.results;
+  if (Array.isArray(payload.rows)) return payload.rows;
+  // иногда прилетает объект с числовыми ключами — превратим в массив значений
+  if (typeof payload === 'object') {
+    const vals = Object.values(payload);
+    if (vals.length && vals.every(v => typeof v === 'object')) return vals as any[];
   }
-}
-export async function saveWeatherFav(fav: { id?:string; lat:number; lng:number; name:string }) {
-  try {
-    return await http(`/weather/favs`, { method:'POST', body: JSON.stringify(fav) });
-  } catch (e:any) {
-    const list = await getWeatherFavs();
-    const withId = { ...fav, id: fav.id || String(Date.now()) };
-    const next = [withId, ...list.filter((x:any)=>x.id!==withId.id)];
-    localStorage.setItem('weather_favs', JSON.stringify(next));
-    return withId;
-  }
+  return [];
 }
 
-/** Техническая проверка доступности API */
-export async function ping() {
-  try {
-    // если есть /health — отлично, иначе быстрая заглушка к /feed с нулевыми лимитами
-    const res = await http(`/health`).catch(() => http(`/feed?limit=1&offset=0`));
-    return { ok: true, res };
-  } catch (e:any) {
-    return { ok: false, error: e?.message || String(e) };
+// === MAP ===
+export async function points(q: PointsQuery = {}): Promise<any[]> {
+  const p = new URLSearchParams();
+  if (q.limit) p.set('limit', String(q.limit));
+  if (q.filter) p.set('filter', q.filter);
+  if (q.bbox) {
+    const s = Array.isArray(q.bbox) ? q.bbox.join(',') : q.bbox;
+    p.set('bbox', s);
   }
+  const res = await http<any>(`/map/points?${p.toString()}`);
+  return normalizeArray(res);
 }
 
-export default {
-  feed,
-  points,
-  getProfile,
-  getNotifications,
-  getCatchById,
-  addComment,
-  addPlace,
-  addCatch,
-  getWeatherFavs,
-  saveWeatherFav,
-  ping,
-};
+// === FEED ===
+export async function feed(limit = 10, offset = 0): Promise<any[]> {
+  const res = await http<any>(`/feed?limit=${limit}&offset=${offset}`);
+  return normalizeArray(res);
+}
+
+// === PROFILE ===
+export async function profileMe(): Promise<any> {
+  return http<any>('/profile/me');
+}
+
+// === NOTIFICATIONS ===
+export async function notifications(): Promise<any[]> {
+  const res = await http<any>('/notifications');
+  return normalizeArray(res);
+}
+
+// === WEATHER FAVS (локально, пока бэкенд не готов) ===
+const LS_KEY = 'weather_favs_v1';
+export type WeatherFav = { lat: number, lng: number, name: string };
+export function getWeatherFavs(): WeatherFav[] {
+  try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { return []; }
+}
+export async function saveWeatherFav(f: WeatherFav): Promise<void> {
+  const list = getWeatherFavs();
+  list.push(f);
+  localStorage.setItem(LS_KEY, JSON.stringify(list));
+}
