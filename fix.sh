@@ -2,38 +2,8 @@
 set -euo pipefail
 
 FRONT="frontend/src"
-PAGES="$FRONT/pages"
+[ -d "$FRONT" ] || { echo "❌ Не найдена папка $FRONT"; exit 1; }
 
-[ -d "frontend" ] || { echo "❌ Не найдена папка frontend (запусти из корня: рядом с frontend/)"; exit 1; }
-mkdir -p "$FRONT" "$PAGES"
-
-########################################
-# config.ts — базовые настройки
-########################################
-cat > "$FRONT/config.ts" <<'TS'
-/**
- * Конфиг фронта.
- * apiBase можно переопределить через:
- *   1) window.__API_BASE__   (вставить <script>window.__API_BASE__="https://api.fishtrackpro.ru"</script>)
- *   2) VITE_API_BASE         (переменная окружения Vite)
- *   3) Значение по умолчанию ниже
- */
-const config = {
-  apiBase:
-    (typeof window !== 'undefined' && (window as any).__API_BASE__) ||
-    (import.meta as any).env?.VITE_API_BASE ||
-    'https://api.fishtrackpro.ru',
-
-  /** вкл/выкл расширенный лог сетевых попыток */
-  debugNetwork: true,
-} as const;
-
-export default config;
-TS
-
-########################################
-# api.ts — умнее фоллбэки + детальный лог
-########################################
 cat > "$FRONT/api.ts" <<'TS'
 import config from './config';
 
@@ -50,7 +20,6 @@ function joinUrl(base:string, path:string) {
   const b = base.replace(/\/+$/,''); const p = path.replace(/^\/+/,'');
   return `${b}/${p}`;
 }
-
 function dedupe<T>(arr:T[]):T[] {
   const seen = new Set<string>();
   return arr.filter((x:any) => {
@@ -59,14 +28,12 @@ function dedupe<T>(arr:T[]):T[] {
     seen.add(key); return true;
   });
 }
-
 async function httpRaw(url:string, opts:FetchOpts): Promise<{res:Response, raw:string, json:any}> {
   const res = await fetch(url, {
     method: opts.method ?? 'GET',
     headers: opts.headers,
     credentials: opts.credentials ?? 'include',
     body: opts.body,
-    // mode: 'cors' // по умолчанию так и есть в браузере
   });
   const raw = await res.text();
   let json:any;
@@ -74,23 +41,13 @@ async function httpRaw(url:string, opts:FetchOpts): Promise<{res:Response, raw:s
   return { res, raw, json };
 }
 
-/**
- * Пробуем несколько баз + префиксов путей.
- * Базы:
- *   1) config.apiBase
- *   2) window.__API_BASE__
- *   3) window.location.origin (поддержка reverse-proxy на том же домене)
- *
- * Префиксы:
- *   /api/v1  →  /api  →  ''
- */
+/** универсальный ретрай по базам и префиксам */
 export async function httpTry<T=any>(path:string, opts:FetchOpts = {}): Promise<T> {
   const bases = dedupe<string>([
     config.apiBase || '',
     (typeof window !== 'undefined' && (window as any).__API_BASE__) || '',
     (typeof window !== 'undefined' && window.location?.origin) || ''
   ]).filter(Boolean);
-
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
   const pathVariants = dedupe<string>([
     normalizedPath.startsWith('/api/v1/') ? normalizedPath : `/api/v1${normalizedPath}`,
@@ -111,8 +68,7 @@ export async function httpTry<T=any>(path:string, opts:FetchOpts = {}): Promise<
         return json as T;
       } catch (e:any) {
         tried.push({url, note: e?.message || 'fetch error'});
-        lastErr = e;
-        continue;
+        lastErr = e; continue;
       }
     }
   }
@@ -122,17 +78,15 @@ export async function httpTry<T=any>(path:string, opts:FetchOpts = {}): Promise<
     console.table(tried);
     console.groupEnd();
   }
-
   const msg =
     (lastErr && (lastErr.payload?.message || lastErr.payload?.error)) ||
     (typeof lastErr?.status === 'number' ? `HTTP ${lastErr.status}` : (lastErr?.message || 'Network/Route error'));
-
   const err:any = new Error(msg);
   (err as any).tried = tried;
   throw err;
 }
 
-/** ---------- Вспомогательные хелперы ---------- */
+/** нормализация ответа в массив */
 function normalizeArray(payload:any): any[] {
   if (Array.isArray(payload)) return payload;
   if (!payload) return [];
@@ -143,14 +97,13 @@ function normalizeArray(payload:any): any[] {
   return [];
 }
 
-/** Простой ping для проверки доступности API */
+/** health-check */
 export async function ping(): Promise<{ok:boolean, base:string}|null> {
   const bases = dedupe<string>([
     config.apiBase || '',
     (typeof window !== 'undefined' && (window as any).__API_BASE__) || '',
     (typeof window !== 'undefined' && window.location?.origin) || ''
   ]).filter(Boolean);
-
   for (const base of bases) {
     try {
       const u = joinUrl(base, '/api/health');
@@ -161,7 +114,7 @@ export async function ping(): Promise<{ok:boolean, base:string}|null> {
   return null;
 }
 
-/** ---------- Endpoints ---------- */
+/** ------------ Endpoints ------------- */
 export type PointsQuery = { limit?: number; bbox?: string | [number,number,number,number]; filter?: string };
 export async function points(q: PointsQuery = {}): Promise<any[]> {
   const p = new URLSearchParams();
@@ -186,14 +139,26 @@ export async function notifications(): Promise<any[]> {
   return normalizeArray(res);
 }
 
-/** Форматирование даты в MySQL DATETIME (локально) */
+/** Weather favorites */
+export type WeatherFav = { id?: number; lat:number; lng:number; title?:string };
+export async function getWeatherFavs(): Promise<WeatherFav[]> {
+  const res = await httpTry<any>('/weather/favs', { method:'GET' });
+  return normalizeArray(res) as WeatherFav[];
+}
+export async function saveWeatherFav(fav: WeatherFav): Promise<any> {
+  return httpTry<any>('/weather/favs', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(fav)
+  });
+}
+
+/** Вспомогательные сабмиты */
 export function toMysqlDatetime(input: string|Date): string {
   const d = typeof input === 'string' ? new Date(input) : input;
   const pad = (n:number)=> (n<10?'0':'')+n;
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
-
-/** submit multipart */
 async function postMultipart<T=any>(path:string, data:Record<string,any>): Promise<T> {
   const fd = new FormData();
   Object.entries(data).forEach(([k,v])=>{
@@ -203,20 +168,17 @@ async function postMultipart<T=any>(path:string, data:Record<string,any>): Promi
   });
   return httpTry<T>(path, { method:'POST', body: fd, credentials:'include' });
 }
-
-/** submit json */
 async function postJson<T=any>(path:string, data:any): Promise<T> {
   return httpTry<T>(path, { method:'POST', body: JSON.stringify(data), headers:{'Content-Type':'application/json'} });
 }
 
-/** ====== Catch ====== */
+/** Catch */
 export type CatchPayload = {
   lat:number; lng:number;
   species:string;
   length?:number; weight?:number;
   style?:string; lure?:string; tackle?:string;
-  notes?:string;
-  photo?: File|null;
+  notes?:string; photo?: File|null;
   caught_at: string; // YYYY-MM-DD HH:mm:ss
   privacy?: 'all'|'friends'|'private';
 };
@@ -226,7 +188,7 @@ export async function createCatch(payload: CatchPayload): Promise<any> {
   return postMultipart('/catch', body);
 }
 
-/** ====== Place ====== */
+/** Place */
 export type PlacePayload = {
   title:string;
   description?:string;
@@ -240,34 +202,13 @@ export type PlacePayload = {
 };
 export async function createPlace(payload: PlacePayload): Promise<any> {
   const body:any = { ...payload };
-  if (payload.photos && payload.photos.length) {
-    body.photos = payload.photos;
-  }
+  if (payload.photos && payload.photos.length) body.photos = payload.photos;
   return postMultipart('/places', body);
 }
-
 export async function getPlaceById(id: string|number): Promise<any> {
   return httpTry<any>(`/places/${id}`, { method:'GET' });
 }
 TS
 
-########################################
-# MapScreen.tsx — безопасное чтение массива
-########################################
-if [ -f "$PAGES/MapScreen.tsx" ]; then
-  # Аккуратная правка: вставим локальный ensureArray и используем его при работе с точками
-  perl -0777 -pe '
-    BEGIN{$/=undef}
-    s@import (.*?) from ..\/api.;@import $1 from "../api";@s;
-    s@(\bfunction\s+MapScreen\b|\bconst\s+MapScreen\b)@const ensureArray=(x:any)=>Array.isArray(x)?x:(x&&Array.isArray(x.items)?x.items:(x&&Array.isArray(x.data)?x.data:(x&&Array.isArray(x.rows)?x.rows:[])));\n\n$&@s;
-    s@(\bawait\s+points\([^)]*\)\))@($1).then((r:any)=>ensureArray(r))@s;
-  ' -i '' "$PAGES/MapScreen.tsx" 2>/dev/null || true
-fi
-
-echo "✅ Обновлено:"
-echo " - $FRONT/config.ts"
-echo " - $FRONT/api.ts"
-[ -f "$PAGES/MapScreen.tsx" ] && echo " - (мягкий патч) $PAGES/MapScreen.tsx"
-echo
-echo "ℹ️ В консоли теперь будет подробный лог httpTry (включён debugNetwork)."
-echo "   При желании можно задать базу так: <script>window.__API_BASE__='https://api.fishtrackpro.ru'</script>"
+echo "✅ Перезаписан $FRONT/api.ts (добавлены getWeatherFavs/saveWeatherFav)"
+echo "Теперь пересобери фронт: npm run build"
