@@ -1,145 +1,70 @@
-import React, { useMemo, useState, useEffect, useCallback } from "react";
+import React, { useMemo } from "react";
 
-// Компоненты-шапка/навигация — импорт как namespace с fallback
-import * as HeaderModule from "./components/Header";
-import * as BottomNavModule from "./components/BottomNav";
+import Header from "./shims/Header";
+import BottomNav from "./shims/BottomNav";
 
-// Страницы — также через namespace + fallback (default или именованный)
-import * as FeedModule from "./pages/FeedScreen";
-import * as MapModule from "./pages/MapScreen";
-import * as CatchModule from "./pages/CatchDetailPage";
-import * as AddCatchModule from "./pages/AddCatchPage";
-import * as AddPlaceModule from "./pages/AddPlacePage";
-import * as AlertsModule from "./pages/NotificationsPage";
-import * as ProfileModule from "./pages/ProfilePage";
-import * as WeatherModule from "./pages/WeatherPage";
-import * as PlaceModule from "./pages/PlaceDetailPage";
+import Feed from "./shims/Feed";
+import Map from "./shims/Map";
+import AddCatch from "./shims/AddCatch";
+import AddPlace from "./shims/AddPlace";
+import Alerts from "./shims/Alerts";
+import Profile from "./shims/Profile";
+import Weather from "./shims/Weather";
+import CatchDetail from "./shims/CatchDetail";
+import PlaceDetail from "./shims/PlaceDetail";
 
-// Fallback-экспорт для компонентов
-const Header: React.FC<any> =
-  (HeaderModule as any).default ?? (HeaderModule as any).Header ?? (() => null);
-const BottomNav: React.FC<any> =
-  (BottomNavModule as any).default ?? (BottomNavModule as any).BottomNav ?? (() => null);
+const routes = {
+  "/": Feed,
+  "/feed": Feed,
+  "/map": Map,
+  "/add/catch": AddCatch,
+  "/add/place": AddPlace,
+  "/alerts": Alerts,
+  "/profile": Profile,
+  "/weather": Weather,
+  "/catch/:id": CatchDetail,
+  "/place/:id": PlaceDetail,
+} as const;
 
-// Fallback-экспорт для страниц
-const FeedScreen: React.FC =
-  (FeedModule as any).default ?? (FeedModule as any).FeedScreen ?? (() => null);
-const MapScreen: React.FC =
-  (MapModule as any).default ?? (MapModule as any).MapScreen ?? (() => null);
-const AddCatchPage: React.FC =
-  (AddCatchModule as any).default ?? (AddCatchModule as any).AddCatchPage ?? (() => null);
-const AddPlacePage: React.FC =
-  (AddPlaceModule as any).default ?? (AddPlaceModule as any).AddPlacePage ?? (() => null);
-const NotificationsPage: React.FC =
-  (AlertsModule as any).default ?? (AlertsModule as any).NotificationsPage ?? (() => null);
-const ProfilePage: React.FC =
-  (ProfileModule as any).default ?? (ProfileModule as any).ProfilePage ?? (() => null);
-const WeatherPage: React.FC =
-  (WeatherModule as any).default ?? (WeatherModule as any).WeatherPage ?? (() => null);
-
-// Страницы с параметрами
-const CatchDetailWrap: React.FC<{ id: string }> = ({ id }) => {
-  const Cmp: React.FC<any> =
-    (CatchModule as any).default ?? (CatchModule as any).CatchDetailPage ?? (() => null);
-  return <Cmp id={id} />;
-};
-
-const PlaceDetailWrap: React.FC<{ id: string }> = ({ id }) => {
-  const Cmp: React.FC<any> =
-    (PlaceModule as any).default ?? (PlaceModule as any).PlaceDetailPage ?? (() => null);
-  return <Cmp id={id} />;
-};
-
-// Простой роутер на History API
-type RouteMatch =
-  | { name: "feed" }
-  | { name: "map" }
-  | { name: "add-catch" }
-  | { name: "add-place" }
-  | { name: "alerts" }
-  | { name: "profile" }
-  | { name: "weather" }
-  | { name: "catch"; id: string }
-  | { name: "place"; id: string }
-  | { name: "unknown" };
-
-function parseRoute(pathname: string): RouteMatch {
-  const p = (pathname || "/").replace(/\/+$/, "") || "/";
-  if (p === "/" || p === "/feed") return { name: "feed" };
-  if (p === "/map") return { name: "map" };
-  if (p === "/add-catch") return { name: "add-catch" };
-  if (p === "/add-place") return { name: "add-place" };
-  if (p === "/alerts") return { name: "alerts" };
-  if (p === "/profile") return { name: "profile" };
-  if (p === "/weather") return { name: "weather" };
-  const c = p.match(/^\/catch\/([^/]+)$/);
-  if (c) return { name: "catch", id: c[1] };
-  const pl = p.match(/^\/place\/([^/]+)$/);
-  if (pl) return { name: "place", id: pl[1] };
-  return { name: "unknown" };
-}
-
-function useRouter() {
-  const [path, setPath] = useState<string>(window.location.pathname + window.location.search);
-  useEffect(() => {
+function usePath() {
+  const [path, setPath] = React.useState(() => window.location.pathname + window.location.search);
+  React.useEffect(() => {
     const onPop = () => setPath(window.location.pathname + window.location.search);
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
-  const navigate = useCallback((to: string) => {
-    if (to !== window.location.pathname + window.location.search) {
-      window.history.pushState({}, "", to);
-      setPath(to);
-      window.dispatchEvent(new Event("route:change"));
-    }
-  }, []);
-  const route = useMemo(() => parseRoute((path || "/").split("?")[0]), [path]);
-  return { route, navigate };
+  return [path, setPath] as const;
 }
 
-const AppRoot: React.FC = () => {
-  const { route, navigate } = useRouter();
-
-  const appStyle: React.CSSProperties = {
-    minHeight: "100dvh",
-    background:
-      "radial-gradient(1200px 800px at 10% 10%, rgba(255,255,255,0.15), transparent 60%), " +
-      "radial-gradient(1000px 700px at 90% 20%, rgba(255,255,255,0.12), transparent 60%), " +
-      "linear-gradient(135deg, rgba(40,60,90,0.65), rgba(10,20,30,0.65))",
-    backdropFilter: "blur(8px)",
-    WebkitBackdropFilter: "blur(8px)",
-  };
-  const shellStyle: React.CSSProperties = { maxWidth: 900, margin: "0 auto", paddingBottom: 72 };
-
-  const go = (to: string) => navigate(to);
-
-  let content: React.ReactNode = null;
-  switch (route.name) {
-    case "feed": content = <FeedScreen />; break;
-    case "map": content = <MapScreen />; break;
-    case "add-catch": content = <AddCatchPage />; break;
-    case "add-place": content = <AddPlacePage />; break;
-    case "alerts": content = <NotificationsPage />; break;
-    case "profile": content = <ProfilePage />; break;
-    case "weather": content = <WeatherPage />; break;
-    case "catch": content = <CatchDetailWrap id={route.id} />; break;
-    case "place": content = <PlaceDetailWrap id={route.id} />; break;
-    default:
-      content = (
-        <div style={{ padding: 24 }}>
-          <h2>Страница не найдена</h2>
-          <p><a href="/feed" onClick={(e) => { e.preventDefault(); go("/feed"); }}>На ленту</a></p>
-        </div>
-      );
+function matchRoute(pathname: string) {
+  for (const [pattern, Comp] of Object.entries(routes)) {
+    if (!pattern.includes(":")) {
+      if (pattern === pathname) return { Comp, params: {} as Record<string,string> };
+      continue;
+    }
+    const re = new RegExp("^" + pattern.replace(/:[^/]+/g, "([^/]+)") + "$");
+    const m = pathname.match(re);
+    if (m) {
+      const keys = (pattern.match(/:([^/]+)/g) || []).map(k => k.slice(1));
+      const params: Record<string,string> = {};
+      keys.forEach((k, i) => params[k] = decodeURIComponent(m[i+1] || ""));
+      return { Comp, params };
+    }
   }
+  return { Comp: Feed, params: {} as Record<string,string> };
+}
 
+export default function AppRoot() {
+  const [path] = usePath();
+  const url = useMemo(() => new URL(path, window.location.origin), [path]);
+  const { Comp, params } = matchRoute(url.pathname);
   return (
-    <div style={appStyle}>
-      <Header onNavigate={go} />
-      <main style={shellStyle}>{content}</main>
-      <BottomNav onNavigate={go} />
+    <div className="app-shell">
+      <Header />
+      <main className="app-main">
+        <Comp {...params} />
+      </main>
+      <BottomNav />
     </div>
   );
-};
-
-export default AppRoot;
+}

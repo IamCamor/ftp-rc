@@ -1,169 +1,75 @@
 #!/usr/bin/env bash
+# macOS-focused cleaner for stray "$@" module-level directives in TS/TSX
 set -euo pipefail
 
 FRONTEND_DIR="frontend"
-SRC_DIR="$FRONTEND_DIR/src"
+SRC="$FRONTEND_DIR/src"
 
-if [ ! -d "$SRC_DIR" ]; then
-  echo "❌ Не найдена папка $SRC_DIR. Запустите скрипт из корня репозитория, где есть папка frontend/."
-  exit 1
+[ -d "$SRC" ] || { echo "❌ Not found: $SRC"; exit 1; }
+
+echo "→ Scanning $SRC for TS/TSX files…"
+# На macOS вместо mapfile используем обычный массив через while/read
+FILES=()
+while IFS= read -r -d '' f; do
+  FILES+=("$f")
+done < <(find "$SRC" -type f \( -name '*.ts' -o -name '*.tsx' \) -print0 | sort -z)
+
+if [ "${#FILES[@]}" -eq 0 ]; then
+  echo "⚠️  No TS/TSX files found under $SRC"
+  exit 0
 fi
 
-echo "→ Патчу src/AppRoot.tsx: безопасные импорты Header/BottomNav и страниц"
-cat > "$SRC_DIR/AppRoot.tsx" <<'TSX'
-import React, { useMemo, useState, useEffect, useCallback } from "react";
+CHANGED=()
 
-// Компоненты-шапка/навигация — импорт как namespace с fallback
-import * as HeaderModule from "./components/Header";
-import * as BottomNavModule from "./components/BottomNav";
+# Регекс для строки, содержащей только $@ (в любых кавычках/пробелах)
+REGEX='^[\p{Space}\x{FEFF}\x{200B}-\x{200D}\x{202F}\x{2060}]*[\"'\''`“”„«»′″’‘]*\s*\$@\s*[\"'\''`“”„«»′″’‘]*[\p{Space}\x{200B}-\x{200D}\x{202F}\x{2060}]*\R?$'
 
-// Страницы — также через namespace + fallback (default или именованный)
-import * as FeedModule from "./pages/FeedScreen";
-import * as MapModule from "./pages/MapScreen";
-import * as CatchModule from "./pages/CatchDetailPage";
-import * as AddCatchModule from "./pages/AddCatchPage";
-import * as AddPlaceModule from "./pages/AddPlacePage";
-import * as AlertsModule from "./pages/NotificationsPage";
-import * as ProfileModule from "./pages/ProfilePage";
-import * as WeatherModule from "./pages/WeatherPage";
-import * as PlaceModule from "./pages/PlaceDetailPage";
+echo "→ Cleaning stray directives…"
+for f in "${FILES[@]}"; do
+  BEFORE_SHA="$(shasum "$f" | awk '{print $1}')"
 
-// Fallback-экспорт для компонентов
-const Header: React.FC<any> =
-  (HeaderModule as any).default ?? (HeaderModule as any).Header ?? (() => null);
-const BottomNav: React.FC<any> =
-  (BottomNavModule as any).default ?? (BottomNavModule as any).BottomNav ?? (() => null);
+  # 1) remove BOM
+  perl -i -pe 'binmode(STDIN, ":utf8"); binmode(STDOUT, ":utf8"); s/^\x{FEFF}//;' "$f"
 
-// Fallback-экспорт для страниц
-const FeedScreen: React.FC =
-  (FeedModule as any).default ?? (FeedModule as any).FeedScreen ?? (() => null);
-const MapScreen: React.FC =
-  (MapModule as any).default ?? (MapModule as any).MapScreen ?? (() => null);
-const AddCatchPage: React.FC =
-  (AddCatchModule as any).default ?? (AddCatchModule as any).AddCatchPage ?? (() => null);
-const AddPlacePage: React.FC =
-  (AddPlaceModule as any).default ?? (AddPlaceModule as any).AddPlacePage ?? (() => null);
-const NotificationsPage: React.FC =
-  (AlertsModule as any).default ?? (AlertsModule as any).NotificationsPage ?? (() => null);
-const ProfilePage: React.FC =
-  (ProfileModule as any).default ?? (ProfileModule as any).ProfilePage ?? (() => null);
-const WeatherPage: React.FC =
-  (WeatherModule as any).default ?? (WeatherModule as any).WeatherPage ?? (() => null);
+  # 2) normalize CRLF → LF
+  perl -i -pe 's/\r\n/\n/g' "$f"
 
-// Страницы с параметрами
-const CatchDetailWrap: React.FC<{ id: string }> = ({ id }) => {
-  const Cmp: React.FC<any> =
-    (CatchModule as any).default ?? (CatchModule as any).CatchDetailPage ?? (() => null);
-  return <Cmp id={id} />;
-};
-
-const PlaceDetailWrap: React.FC<{ id: string }> = ({ id }) => {
-  const Cmp: React.FC<any> =
-    (PlaceModule as any).default ?? (PlaceModule as any).PlaceDetailPage ?? (() => null);
-  return <Cmp id={id} />;
-};
-
-// Простой роутер на History API
-type RouteMatch =
-  | { name: "feed" }
-  | { name: "map" }
-  | { name: "add-catch" }
-  | { name: "add-place" }
-  | { name: "alerts" }
-  | { name: "profile" }
-  | { name: "weather" }
-  | { name: "catch"; id: string }
-  | { name: "place"; id: string }
-  | { name: "unknown" };
-
-function parseRoute(pathname: string): RouteMatch {
-  const p = (pathname || "/").replace(/\/+$/, "") || "/";
-  if (p === "/" || p === "/feed") return { name: "feed" };
-  if (p === "/map") return { name: "map" };
-  if (p === "/add-catch") return { name: "add-catch" };
-  if (p === "/add-place") return { name: "add-place" };
-  if (p === "/alerts") return { name: "alerts" };
-  if (p === "/profile") return { name: "profile" };
-  if (p === "/weather") return { name: "weather" };
-  const c = p.match(/^\/catch\/([^/]+)$/);
-  if (c) return { name: "catch", id: c[1] };
-  const pl = p.match(/^\/place\/([^/]+)$/);
-  if (pl) return { name: "place", id: pl[1] };
-  return { name: "unknown" };
-}
-
-function useRouter() {
-  const [path, setPath] = useState<string>(window.location.pathname + window.location.search);
-  useEffect(() => {
-    const onPop = () => setPath(window.location.pathname + window.location.search);
-    window.addEventListener("popstate", onPop);
-    return () => window.removeEventListener("popstate", onPop);
-  }, []);
-  const navigate = useCallback((to: string) => {
-    if (to !== window.location.pathname + window.location.search) {
-      window.history.pushState({}, "", to);
-      setPath(to);
-      window.dispatchEvent(new Event("route:change"));
+  # 3) drop lines with only $@-variants
+  perl -CSD -0777 -i -pe '
+    use utf8;
+    my $rx = q{'"$REGEX"'};
+    my @out;
+    for my $line (split /\n/, $_, -1) {
+      my $test = $line . "\n";
+      if ($test =~ /$rx/uo) { next; }
+      push @out, $line;
     }
-  }, []);
-  const route = useMemo(() => parseRoute((path || "/").split("?")[0]), [path]);
-  return { route, navigate };
-}
+    $_ = join("\n", @out);
+  ' "$f"
 
-const AppRoot: React.FC = () => {
-  const { route, navigate } = useRouter();
+  AFTER_SHA="$(shasum "$f" | awk '{print $1}')"
+  if [ "$BEFORE_SHA" != "$AFTER_SHA" ]; then
+    CHANGED+=("$f")
+  fi
+done
 
-  const appStyle: React.CSSProperties = {
-    minHeight: "100dvh",
-    background:
-      "radial-gradient(1200px 800px at 10% 10%, rgba(255,255,255,0.15), transparent 60%), " +
-      "radial-gradient(1000px 700px at 90% 20%, rgba(255,255,255,0.12), transparent 60%), " +
-      "linear-gradient(135deg, rgba(40,60,90,0.65), rgba(10,20,30,0.65))",
-    backdropFilter: "blur(8px)",
-    WebkitBackdropFilter: "blur(8px)",
-  };
-  const shellStyle: React.CSSProperties = { maxWidth: 900, margin: "0 auto", paddingBottom: 72 };
-
-  const go = (to: string) => navigate(to);
-
-  let content: React.ReactNode = null;
-  switch (route.name) {
-    case "feed": content = <FeedScreen />; break;
-    case "map": content = <MapScreen />; break;
-    case "add-catch": content = <AddCatchPage />; break;
-    case "add-place": content = <AddPlacePage />; break;
-    case "alerts": content = <NotificationsPage />; break;
-    case "profile": content = <ProfilePage />; break;
-    case "weather": content = <WeatherPage />; break;
-    case "catch": content = <CatchDetailWrap id={route.id} />; break;
-    case "place": content = <PlaceDetailWrap id={route.id} />; break;
-    default:
-      content = (
-        <div style={{ padding: 24 }}>
-          <h2>Страница не найдена</h2>
-          <p><a href="/feed" onClick={(e) => { e.preventDefault(); go("/feed"); }}>На ленту</a></p>
-        </div>
-      );
-  }
-
-  return (
-    <div style={appStyle}>
-      <Header onNavigate={go} />
-      <main style={shellStyle}>{content}</main>
-      <BottomNav onNavigate={go} />
-    </div>
-  );
-};
-
-export default AppRoot;
-TSX
-
-# на всякий случай убеждаемся, что App.tsx реэкспортит AppRoot
-if [ -f "$SRC_DIR/App.tsx" ]; then
-  echo 'export { default } from "./AppRoot";' > "$SRC_DIR/App.tsx"
+if [ "${#CHANGED[@]}" -gt 0 ]; then
+  echo "✅ Modified files (${#CHANGED[@]}):"
+  printf ' - %s\n' "${CHANGED[@]}"
+else
+  echo "✅ Nothing to change — already clean."
 fi
 
-echo "→ Сборка фронта"
+echo "→ Verifying there are no remaining lines with only $@…"
+if grep -R --line-number -E '^[[:space:]]*("\$@"|'\''\$@'\''|`\$@`|\$@)[[:space:]]*$' "$SRC" >/dev/null 2>&1; then
+  echo "❌ Still found suspicious lines:"
+  grep -R --line-number -E '^[[:space:]]*("\$@"|'\''\$@'\''|`\$@`|\$@)[[:space:]]*$' "$SRC" || true
+  exit 2
+else
+  echo "✅ No stray $@ directives remain."
+fi
+
+echo "→ Building frontend…"
 ( cd "$FRONTEND_DIR" && npm run build )
 
-echo "✅ Готово: Header/BottomNav подключены через fallback-импорты, сборка должна пройти."
+echo "🎯 Done."
