@@ -4,9 +4,6 @@ import './styles/app.css';
 import AppRoot from './AppRoot';
 
 const el = document.getElementById('root');
-if (!el) {
-  throw new Error('#root not found');
-}
-const root = createRoot(el);
+if (!el) throw new Error('#root not found');
+createRoot(el).render(<AppRoot />);
 console.log('[boot] App mounted');
-root.render(<AppRoot />);

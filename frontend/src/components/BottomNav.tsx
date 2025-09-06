@@ -1,26 +1,25 @@
 import React from 'react';
-import { NavLink } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 
-const Item: React.FC<{to:string; icon:string; label:string}> = ({to, icon, label}) => (
-  <NavLink to={to} className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
-    <span className="icon">{icon}</span>
-    <span>{label}</span>
-  </NavLink>
-);
-
-const BottomNav: React.FC = () => {
+const Tab:React.FC<{to:string; icon:string; title:string}> = ({to, icon, title}) => {
+  const loc = useLocation();
+  const active = loc.pathname === to || (to !== '/' && loc.pathname.startsWith(to));
   return (
-    <nav className="glass footer-glass">
-      <div className="bottom-bar" style={{justifyContent:'space-around'}}>
-        <Item to="/feed" icon="home" label="Лента"/>
-        <Item to="/map" icon="map" label="Карта"/>
-        <Item to="/add/catch" icon="add_circle" label="Улов"/>
-        <Item to="/alerts" icon="notifications" label="Оповещения"/>
-        <Item to="/profile" icon="person" label="Профиль"/>
-      </div>
-    </nav>
+    <Link className="btn" to={to} title={title} style={{opacity: active ? 1 : 0.65}}>
+      <span className="material-symbols-rounded">{icon}</span>
+      <span style={{marginLeft:6}}>{title}</span>
+    </Link>
   );
 };
 
+const BottomNav: React.FC = () => {
+  return (
+    <div className="bottom-nav glass">
+      <Tab to="/feed" icon="home" title="Лента" />
+      <Tab to="/map" icon="map" title="Карта" />
+      <Tab to="/add/catch" icon="add_circle" title="Улов" />
+      <Tab to="/add/place" icon="add_location_alt" title="Место" />
+    </div>
+  );
+};
 export default BottomNav;
-export { BottomNav };

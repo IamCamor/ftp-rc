@@ -2,36 +2,26 @@ import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import config from '../config';
 
-type HeaderProps = { bonuses?: number };
-
-const Header: React.FC<HeaderProps> = ({ bonuses = 0 }) => {
-  const { pathname } = useLocation();
-  const onWeather = ['/weather'].includes(pathname);
-
+const Header: React.FC = () => {
+  const loc = useLocation();
   return (
-    <header className="glass header-glass">
-      <div className="header-bar">
-        <div className="brand">
-          <img src={config.assets.logo} alt="logo"/>
-          <span className="title">FishTrack Pro</span>
-        </div>
-        <div className="nav-row">
-          <Link to="/weather" className={`btn ${onWeather ? 'active' : ''}`} title="Погода">
-            <span className="icon">cloud</span>
-            <span>Погода</span>
-          </Link>
-          <Link to="/alerts" className="btn" title="Уведомления">
-            <span className="icon">notifications</span>
-          </Link>
-          <Link to="/profile" className="btn" title="Профиль">
-            <span className="icon">person</span>
-            <span style={{marginLeft:4}}>{bonuses}</span>
-          </Link>
-        </div>
+    <div className="header glass">
+      <div className="brand">
+        <img src={config.brand.logoUrl} alt="logo"/>
+        <strong>{config.brand.name}</strong>
       </div>
-    </header>
+      <div className="nav-actions">
+        <Link className="btn" to="/weather" title="Погода">
+          <span className="material-symbols-rounded">sunny</span>
+        </Link>
+        <Link className="btn" to="/alerts" title="Уведомления">
+          <span className="material-symbols-rounded">notifications</span>
+        </Link>
+        <Link className="btn" to="/profile" title="Профиль">
+          <span className="material-symbols-rounded">account_circle</span>
+        </Link>
+      </div>
+    </div>
   );
 };
-
 export default Header;
-export { Header };
