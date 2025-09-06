@@ -1,70 +1,52 @@
-import React, { useMemo } from "react";
+import React from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import ErrorBoundary from './safety/ErrorBoundary';
 
-import Header from "./shims/Header";
-import BottomNav from "./shims/BottomNav";
+// Шапка / низ — через шимы, чтобы не падать, если нет default экспорта
+import Header from './shims/Header';
+import BottomNav from './shims/BottomNav';
 
-import Feed from "./shims/Feed";
-import Map from "./shims/Map";
-import AddCatch from "./shims/AddCatch";
-import AddPlace from "./shims/AddPlace";
-import Alerts from "./shims/Alerts";
-import Profile from "./shims/Profile";
-import Weather from "./shims/Weather";
-import CatchDetail from "./shims/CatchDetail";
-import PlaceDetail from "./shims/PlaceDetail";
+// Страницы
+import FeedScreen from './shims/Feed';
+import MapScreen from './shims/Map';
+import AddCatchPage from './shims/AddCatch';
+import AddPlacePage from './shims/AddPlace';
+import NotificationsPage from './shims/Alerts';
+import ProfilePage from './shims/Profile';
+import WeatherPage from './shims/Weather';
+import CatchDetailPage from './shims/CatchDetail';
+import PlaceDetailPage from './shims/PlaceDetail';
 
-const routes = {
-  "/": Feed,
-  "/feed": Feed,
-  "/map": Map,
-  "/add/catch": AddCatch,
-  "/add/place": AddPlace,
-  "/alerts": Alerts,
-  "/profile": Profile,
-  "/weather": Weather,
-  "/catch/:id": CatchDetail,
-  "/place/:id": PlaceDetail,
-} as const;
+const Shell: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <div style={{minHeight:'100vh',background:'radial-gradient(1200px 800px at 20% -10%,rgba(255,255,255,.18),transparent),linear-gradient( to bottom right, rgba(30,30,45,.85), rgba(12,14,20,.95))', backdropFilter:'blur(12px)'}}>
+    <Header />
+    <main style={{padding:'12px 12px 72px'}}>{children}</main>
+    <BottomNav />
+  </div>
+);
 
-function usePath() {
-  const [path, setPath] = React.useState(() => window.location.pathname + window.location.search);
-  React.useEffect(() => {
-    const onPop = () => setPath(window.location.pathname + window.location.search);
-    window.addEventListener("popstate", onPop);
-    return () => window.removeEventListener("popstate", onPop);
-  }, []);
-  return [path, setPath] as const;
-}
-
-function matchRoute(pathname: string) {
-  for (const [pattern, Comp] of Object.entries(routes)) {
-    if (!pattern.includes(":")) {
-      if (pattern === pathname) return { Comp, params: {} as Record<string,string> };
-      continue;
-    }
-    const re = new RegExp("^" + pattern.replace(/:[^/]+/g, "([^/]+)") + "$");
-    const m = pathname.match(re);
-    if (m) {
-      const keys = (pattern.match(/:([^/]+)/g) || []).map(k => k.slice(1));
-      const params: Record<string,string> = {};
-      keys.forEach((k, i) => params[k] = decodeURIComponent(m[i+1] || ""));
-      return { Comp, params };
-    }
-  }
-  return { Comp: Feed, params: {} as Record<string,string> };
-}
-
-export default function AppRoot() {
-  const [path] = usePath();
-  const url = useMemo(() => new URL(path, window.location.origin), [path]);
-  const { Comp, params } = matchRoute(url.pathname);
+const AppRoot: React.FC = () => {
   return (
-    <div className="app-shell">
-      <Header />
-      <main className="app-main">
-        <Comp {...params} />
-      </main>
-      <BottomNav />
-    </div>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <Shell>
+          <Routes>
+            <Route path="/" element={<Navigate to="/feed" replace/>} />
+            <Route path="/feed" element={<FeedScreen />} />
+            <Route path="/map" element={<MapScreen />} />
+            <Route path="/catch/add" element={<AddCatchPage />} />
+            <Route path="/place/add" element={<AddPlacePage />} />
+            <Route path="/alerts" element={<NotificationsPage />} />
+            <Route path="/profile" element={<ProfilePage />} />
+            <Route path="/weather" element={<WeatherPage />} />
+            <Route path="/catch/:id" element={<CatchDetailPage />} />
+            <Route path="/place/:id" element={<PlaceDetailPage />} />
+            <Route path="*" element={<div style={{padding:16}}>404</div>} />
+          </Routes>
+        </Shell>
+      </BrowserRouter>
+    </ErrorBoundary>
   );
-}
+};
+
+export default AppRoot;

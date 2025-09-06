@@ -1,19 +1,9 @@
-/* Auto-shim: подхватывает default, именованный или любой похожий на React-компонент */
 import * as M from '../components/Header';
-
-const pickFromNamespace = (mod: any, prefer: string) => {
-  if (!mod || typeof mod !== 'object') return null;
-  // 1) default, если есть
-  if (mod.default) return mod.default;
-  // 2) предпочитаемый именованный
-  if (prefer && mod[prefer]) return mod[prefer];
-  // 3) любой элемент, похожий на React-компонент
-  const cand = Object.values(mod).find((v: any) =>
-    typeof v === 'function' ||
-    (v && typeof v === 'object' && (v as any).$$typeof) // React element type symbol
-  );
-  return cand || null;
-};
-
-const C: any = pickFromNamespace(M as any, 'Header') || (() => null);
+import React from 'react';
+const pick = (mod: any): any =>
+  mod?.default ??
+  mod?.Header ??
+  Object.values(mod || {}).find((v:any)=> typeof v==='function' || (v && typeof v==='object' && 'props' in v)) ??
+  (() => <div style={{padding:16}}>⚠️ Не найден экспорт для <b>Header</b> из <code>../components/Header</code></div>);
+const C: any = pick(M);
 export default C;
