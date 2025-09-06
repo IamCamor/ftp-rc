@@ -2,187 +2,94 @@
 set -euo pipefail
 
 ROOT="$(pwd)"
-SRC="${ROOT}/src"
+SRC="$ROOT/src"
+CMP="$SRC/components"
 
-if [ ! -d "$SRC" ]; then
-  # если запущено из корня репо вида frontend/, попробуем поправить путь
-  if [ -d "${ROOT}/frontend/src" ]; then
-    SRC="${ROOT}/frontend/src"
-  else
-    echo "❌ Не найдена папка src. Запускайте из корня фронтенда или репозитория."
-    exit 1
-  fi
+# Если проект лежит в ./frontend/
+if [ ! -d "$SRC" ] && [ -d "$ROOT/frontend/src" ]; then
+  SRC="$ROOT/frontend/src"
+  CMP="$SRC/components"
 fi
 
-echo "→ Пишу ${SRC}/config.ts"
-cat > "${SRC}/config.ts" <<'TS'
-/**
- * Единый конфиг приложения.
- * ВАЖНО: default export!
- */
-export type AppConfig = {
-  apiBase: string;
-  debugNetwork: boolean;
-  ui: {
-    logoUrl: string;
-    defaultAvatar: string;
-    bgPattern: string;
-    icons: Record<string, string>;
-  };
-};
+mkdir -p "$CMP"
 
-const API_FROM_WINDOW =
-  (typeof window !== 'undefined' && (window as any).__API_BASE__) || '';
-
-const config: AppConfig = {
-  apiBase: API_FROM_WINDOW || 'https://api.fishtrackpro.ru',
-  debugNetwork: false,
-  ui: {
-    // поставьте сюда ваш лого, можно абсолютный https://
-    logoUrl: '/logo.svg',
-    // дефолтная аватарка (желательно https, чтобы не ловить mixed content/cert)
-    defaultAvatar: 'https://www.fishtrackpro.ru/assets/default-avatar.png',
-    // фоновый паттерн
-    bgPattern: 'https://www.fishtrackpro.ru/assets/pattern.png',
-    // материал-иконки по ключам
-    icons: {
-      feed: 'home',
-      map: 'map',
-      add: 'add_circle',
-      alerts: 'notifications',
-      profile: 'account_circle',
-      like: 'favorite',
-      comment: 'chat_bubble',
-      share: 'share',
-      weather: 'cloud',
-      back: 'arrow_back',
-    },
-  },
-};
-
-export default config;
-TS
-
-echo "→ Пишу ${SRC}/components/Header.tsx"
-mkdir -p "${SRC}/components"
-cat > "${SRC}/components/Header.tsx" <<'TS'
+echo "→ Write $CMP/Icon.tsx"
+cat > "$CMP/Icon.tsx" <<'TS'
 import React from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import config from '../config';
-import Icon from './Icon';
 
-type HeaderProps = {
-  bonuses?: number;
+/**
+ * Универсальная иконка на Material Symbols Rounded.
+ * Требует <link> на шрифт в index.html:
+ *   https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0
+ */
+export type IconProps = {
+  name: string;      // название иконки, например: "map", "notifications"
+  size?: number;     // px
+  title?: string;
+  className?: string;
+  /**
+   * оси шрифта — можно не трогать: дефолты ок
+   */
+  fill?: 0 | 1;
+  weight?: 100 | 200 | 300 | 400 | 500 | 600 | 700;
+  grade?: -25 | 0 | 200;
+  opsz?: 20 | 24 | 40 | 48;
+  style?: React.CSSProperties;
 };
 
-const Header: React.FC<HeaderProps> = ({ bonuses = 0 }) => {
-  const { pathname } = useLocation();
-  const ui = config?.ui || ({} as any);
-  const logo = ui.logoUrl || '';
-  const bg = ui.bgPattern || '';
-
+export const Icon: React.FC<IconProps> = ({
+  name,
+  size = 24,
+  title,
+  className = '',
+  fill = 0,
+  weight = 400,
+  grade = 0,
+  opsz = 24,
+  style = {},
+}) => {
+  const fontVariationSettings = `'FILL' ${fill}, 'wght' ${weight}, 'GRAD' ${grade}, 'opsz' ${opsz}`;
   return (
-    <header
-      className="app-header glass"
+    <span
+      className={`material-symbols-rounded ${className}`.trim()}
+      aria-hidden={title ? undefined : true}
+      title={title}
       style={{
-        position: 'sticky',
-        top: 0,
-        backdropFilter: 'blur(10px)',
-        WebkitBackdropFilter: 'blur(10px)',
-        background:
-          'linear-gradient(135deg, rgba(255,255,255,0.55), rgba(255,255,255,0.15))',
-        borderBottom: '1px solid rgba(255,255,255,0.2)',
-        zIndex: 10,
+        fontVariationSettings,
+        fontSize: size,
+        lineHeight: 1,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        ...style,
       }}
     >
-      <div
-        style={{
-          backgroundImage: bg ? `url(${bg})` : 'none',
-          backgroundSize: 'cover',
-          backgroundRepeat: 'no-repeat',
-        }}
-      >
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr auto 1fr',
-            alignItems: 'center',
-            gap: '12px',
-            padding: '10px 12px',
-          }}
-        >
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <Link to="/" title="Лента">
-              {logo ? (
-                <img
-                  src={logo}
-                  alt="logo"
-                  style={{ height: 28, width: 'auto', display: 'block' }}
-                />
-              ) : (
-                <strong>FishTrack Pro</strong>
-              )}
-            </Link>
-          </div>
-
-          <div style={{ textAlign: 'center', fontWeight: 600 }}>
-            {pathname === '/map'
-              ? 'Карта'
-              : pathname === '/alerts'
-              ? 'Уведомления'
-              : pathname === '/profile'
-              ? 'Профиль'
-              : pathname === '/weather'
-              ? 'Погода'
-              : 'Лента'}
-          </div>
-
-          <div
-            style={{
-              display: 'flex',
-              gap: 14,
-              alignItems: 'center',
-              justifyContent: 'flex-end',
-            }}
-          >
-            <Link to="/weather" aria-label="Погода" title="Погода">
-              <Icon name={ui.icons?.weather || 'cloud'} size={24} />
-            </Link>
-
-            <Link to="/alerts" aria-label="Уведомления" title="Уведомления">
-              <Icon name={ui.icons?.alerts || 'notifications'} size={24} />
-            </Link>
-
-            <Link to="/profile" aria-label="Профиль" title="Профиль">
-              <div
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  padding: '4px 8px',
-                  borderRadius: 999,
-                  background: 'rgba(0,0,0,0.05)',
-                }}
-              >
-                <Icon name={ui.icons?.profile || 'account_circle'} size={22} />
-                <span style={{ fontSize: 12, fontWeight: 700 }}>{bonuses}</span>
-              </div>
-            </Link>
-          </div>
-        </div>
-      </div>
-    </header>
+      {name}
+    </span>
   );
 };
 
-export default Header;
+// Именованный и дефолтный экспорт — чтобы любые импорты работали
+export default Icon;
 TS
 
-# На всякий случай правим BottomNav на default-import config
-if [ -f "${SRC}/components/BottomNav.tsx" ]; then
-  echo "→ Обновляю ${SRC}/components/BottomNav.tsx (импорт config)"
-  perl -0777 -pe 's/import\s*\{\s*config\s*\}\s*from\s*[\'"]\.\.\/config[\'"]/import config from "..\/config"/g' \
-    -i "${SRC}/components/BottomNav.tsx" || true
+# Добавим линк на Material Symbols, если отсутствует
+INDEX_HTML="$ROOT/index.html"
+if [ ! -f "$INDEX_HTML" ] && [ -f "$ROOT/frontend/index.html" ]; then
+  INDEX_HTML="$ROOT/frontend/index.html"
 fi
 
-echo "✅ Готово. Теперь соберите проект: npm run build"
+if [ -f "$INDEX_HTML" ]; then
+  if ! grep -q "Material\+Symbols\+Rounded" "$INDEX_HTML"; then
+    echo "→ Patch $INDEX_HTML (Material Symbols link)"
+    # Вставим перед закрывающим </head>
+    # правильный порядок осей: opsz,wght,FILL,GRAD
+    perl -0777 -pe "s#</head>#  <link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0\" />\n</head>#g" -i "$INDEX_HTML"
+  else
+    echo "✓ index.html already has Material Symbols link"
+  fi
+else
+  echo "⚠️ index.html not found — добавьте линк на шрифт вручную при необходимости."
+fi
+
+echo "✅ Done. Now run: npm run build"
