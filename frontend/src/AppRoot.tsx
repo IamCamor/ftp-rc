@@ -1,16 +1,3 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-FRONTEND_DIR="frontend"
-SRC_DIR="$FRONTEND_DIR/src"
-
-if [ ! -d "$SRC_DIR" ]; then
-  echo "❌ Не найдена папка $SRC_DIR. Запустите скрипт из корня репозитория, где есть папка frontend/."
-  exit 1
-fi
-
-echo "→ Патчу src/AppRoot.tsx: безопасные импорты Header/BottomNav и страниц"
-cat > "$SRC_DIR/AppRoot.tsx" <<'TSX'
 import React, { useMemo, useState, useEffect, useCallback } from "react";
 
 // Компоненты-шапка/навигация — импорт как namespace с fallback
@@ -156,14 +143,3 @@ const AppRoot: React.FC = () => {
 };
 
 export default AppRoot;
-TSX
-
-# на всякий случай убеждаемся, что App.tsx реэкспортит AppRoot
-if [ -f "$SRC_DIR/App.tsx" ]; then
-  echo 'export { default } from "./AppRoot";' > "$SRC_DIR/App.tsx"
-fi
-
-echo "→ Сборка фронта"
-( cd "$FRONTEND_DIR" && npm run build )
-
-echo "✅ Готово: Header/BottomNav подключены через fallback-импорты, сборка должна пройти."
