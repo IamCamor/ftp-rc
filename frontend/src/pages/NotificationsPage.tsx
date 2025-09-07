@@ -1,66 +1,108 @@
 import React, { useEffect, useState } from 'react';
-import { api } from '../api';
+import config from '../config';
 
 type Notice = {
-  id: number|string;
+  id: number | string;
   type: string;
   title?: string;
   message?: string;
   created_at?: string;
-  link?: string;
+  read_at?: string | null;
 };
 
-export default function NotificationsPage() {
-  const [items, setItems] = useState<Notice[]>([]);
-  const [error, setError] = useState('');
+const NotificationsPage: React.FC = () => {
+  const [items, setItems] = useState<Notice[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  useEffect(()=>{
-    (async ()=>{
+  useEffect(() => {
+    let alive = true;
+
+    async function load() {
+      setLoading(true);
+      setError(null);
+
       try {
-        setError('');
-        const data: any = await api.notifications();
-        const list = Array.isArray(data?.items) ? data.items
-                   : Array.isArray(data?.data) ? data.data
-                   : Array.isArray(data) ? data : [];
+        const token = localStorage.getItem('token') || '';
+        const res = await fetch(`${config.apiBase}/notifications`, {
+          headers: {
+            'Accept': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+          },
+          credentials: 'include',
+        });
+
+        // Бек может вернуть 404, если роут ещё не включён
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
+        }
+
+        const data = await res.json();
+        // Ожидаем массив; если пришёл объект — аккуратно достанем поле
+        const list: Notice[] = Array.isArray(data)
+          ? data
+          : Array.isArray((data as any).data)
+          ? (data as any).data
+          : [];
+
+        if (!alive) return;
         setItems(list);
-      } catch (e:any) {
-        // Часто: 404 если ручка ещё не сделана на бэке, или CORS
-        setError(e?.message || 'Недоступно');
-        setItems([]);
+      } catch (e: any) {
+        if (!alive) return;
+        // Частый кейс — CORS/сеть
+        setError(
+          e?.message?.includes('Failed to fetch')
+            ? 'Не удалось загрузить. Проверьте сеть или CORS.'
+            : e?.message || 'Ошибка загрузки уведомлений'
+        );
+      } finally {
+        if (alive) setLoading(false);
       }
-    })();
-  },[]);
+    }
+
+    load();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  if (loading) {
+    return <div className="container">Загрузка уведомлений…</div>;
+  }
+
+  if (error) {
+    return (
+      <div className="container">
+        <div className="card error">
+          <div className="card-title">Ошибка</div>
+          <div className="card-text">{error}</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!items || items.length === 0) {
+    return <div className="container">Пока уведомлений нет.</div>;
+  }
 
   return (
-    <div className="p-3">
-      <div className="glass card p-3 mb-3">
-        <strong>Уведомления</strong>
-      </div>
-
-      {error && (
-        <div className="text-sm text-amber-600 mb-3">
-          {error.includes('404') ? 'Ручка /api/v1/notifications ещё не доступна' : error}
-        </div>
-      )}
-
-      {items.length === 0 && !error && (
-        <div className="opacity-70 text-sm">Пока уведомлений нет</div>
-      )}
-
-      <div className="grid gap-2">
-        {items.map(n=>(
-          <div key={String(n.id)} className="glass-light p-3">
-            <div className="text-xs opacity-70">{n.type}</div>
-            <div className="font-medium">{n.title || n.message || 'Событие'}</div>
-            {n.link && (
-              <a className="text-blue-600 underline" href={n.link}>Открыть</a>
-            )}
-            {n.created_at && (
-              <div className="text-xs opacity-70 mt-1">{new Date(n.created_at).toLocaleString()}</div>
-            )}
-          </div>
+    <div className="container">
+      <h1 className="page-title">Уведомления</h1>
+      <ul className="list">
+        {items.map((n) => (
+          <li key={n.id} className="list-item">
+            <div className="list-title">{n.title || n.type}</div>
+            {n.message && <div className="list-subtitle">{n.message}</div>}
+            <div className="list-meta">
+              {n.created_at ? new Date(n.created_at).toLocaleString() : ''}
+              {n.read_at ? ' • прочитано' : ''}
+            </div>
+          </li>
         ))}
-      </div>
+      </ul>
     </div>
   );
-}
+};
+
+export default NotificationsPage;
