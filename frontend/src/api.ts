@@ -1,172 +1,238 @@
+// Унифицированный API-клиент для фронта.
+// Важно: CORS не трогаем (работает на бэке).
+
 import config from './config';
 
-/** ====== helpers ====== */
-type HttpOpts = {
-  method?: 'GET'|'POST'|'PUT'|'PATCH'|'DELETE';
-  body?: any;
-  headers?: Record<string,string>;
-  auth?: boolean;           // добавлять Bearer токен
-  credentials?: RequestCredentials; // по умолчанию 'omit'
-};
+type Json = any;
 
-function getToken(): string | null {
-  try { return localStorage.getItem('token'); } catch { return null; }
+const apiBase =
+  (config as any)?.api?.v1Base ??
+  (config as any)?.apiBase ??
+  (config as any)?.api?.base ??
+  '/api/v1';
+
+function normUrl(path: string) {
+  if (!path.startsWith('/')) path = '/' + path;
+  // если apiBase уже содержит /api/v1 — не дублируем
+  if (apiBase.endsWith('/')) return apiBase.replace(/\/+$/,'') + path;
+  return apiBase + path;
 }
 
-function setToken(token?: string) {
-  try {
-    if (token) localStorage.setItem('token', token);
-  } catch {}
-}
+async function req<T = Json>(
+  path: string,
+  opts: RequestInit & { auth?: boolean; formData?: boolean } = {}
+): Promise<T> {
+  const url = normUrl(path);
+  const headers: Record<string, string> = { Accept: 'application/json' };
 
-export function logout() {
-  try { localStorage.removeItem('token'); } catch {}
-}
+  const token = localStorage.getItem('token');
+  if (opts.auth && token) headers['Authorization'] = `Bearer ${token}`;
 
-async function http<T=any>(url: string, opts: HttpOpts = {}): Promise<T> {
-  const {
-    method = 'GET',
-    body,
-    headers = {},
-    auth = true,
-    credentials = 'omit'
-  } = opts;
-
-  const token = getToken();
+  let body: BodyInit | undefined = opts.body as any;
+  if (!opts.formData && body && typeof body === 'object') {
+    headers['Content-Type'] = 'application/json';
+    body = JSON.stringify(body);
+  }
 
   const res = await fetch(url, {
-    method,
-    credentials,
-    headers: {
-      'Accept': 'application/json',
-      ...(body ? { 'Content-Type': 'application/json' } : {}),
-      ...(auth && token ? { 'Authorization': `Bearer ${token}` } : {}),
-      ...headers,
-    },
-    body: body ? JSON.stringify(body) : undefined,
+    method: opts.method || 'GET',
+    credentials: 'include',
+    headers,
+    body,
+    cache: 'no-store',
   });
 
-  // читаем как текст, затем пытаемся JSON
-  const text = await res.text().catch(()=> '');
-  let data: any = null;
-  try { data = text ? JSON.parse(text) : null; } catch { data = text; }
-
   if (!res.ok) {
-    const msg = (data && (data.message || data.error)) || `${res.status} ${res.statusText}`;
-    const err: any = new Error(msg);
-    err.status = res.status;
-    err.payload = data;
-    throw err;
+    // Попробуем отдать JSON с ошибкой
+    let err: any = null;
+    try { err = await res.json(); } catch {}
+    const msg = err?.message || `HTTP ${res.status}`;
+    throw new Error(msg);
   }
-  return (data ?? undefined) as T;
-}
 
-/** ====== bases ====== */
-const base = config.apiBase;     // например: https://api.fishtrackpro.ru/api/v1
-const authBase = config.authBase; // например: https://api.fishtrackpro.ru
+  // Пустой ответ
+  if (res.status === 204) return null as T;
 
-/** ====== AUTH на authBase ====== */
-export async function login(email: string, password: string) {
-  const r = await http<{ token?: string; [k:string]: any }>(
-    `${authBase}/auth/login`,
-    { method:'POST', body:{ email, password }, auth:false }
-  );
-  if (r?.token) setToken(r.token);
-  return r;
-}
+  // JSON или пусто
+  const text = await res.text();
+  if (!text) return null as T;
 
-export async function register(
-  name: string,
-  email: string,
-  password: string,
-  username?: string,
-  avatarUrl?: string
-) {
-  const body: any = { name, email, password };
-  if (username) body.username = username;
-  if (avatarUrl) body.photo_url = avatarUrl;
-
-  const r = await http<{ token?: string; [k:string]: any }>(
-    `${authBase}/auth/register`,
-    { method:'POST', body, auth:false }
-  );
-  if (r?.token) setToken(r.token);
-  return r;
-}
-
-export function oauthStart(provider: 'google'|'vk'|'yandex'|'apple') {
-  // редиректим на backend-роут/oauth-провайдера
-  window.location.href = `${authBase}/auth/${provider}/redirect`;
-}
-
-export function isAuthed() {
-  return !!getToken();
-}
-
-/** ====== API на apiBase (/api/v1/...) ====== */
-
-// лента
-export async function feed(limit=10, offset=0) {
-  return http(`${base}/feed?limit=${limit}&offset=${offset}`, { method:'GET' });
-}
-
-// карта: точки
-export type BBox = { west:number; south:number; east:number; north:number };
-export async function points(limit=500, bbox?: BBox) {
-  const params = new URLSearchParams();
-  params.set('limit', String(limit));
-  if (bbox) {
-    params.set('bbox', `${bbox.west},${bbox.south},${bbox.east},${bbox.north}`);
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    // Если не JSON — вернём как есть
+    return (text as unknown) as T;
   }
-  return http(`${base}/map/points?${params.toString()}`, { method:'GET' });
 }
 
-// детали улова
-export async function catchById(id: number|string) {
-  return http(`${base}/catch/${id}`, { method:'GET' });
+/** ====== FEED ====== */
+export async function feed(params: { limit?: number; offset?: number } = {}) {
+  const q = new URLSearchParams();
+  if (params.limit != null) q.set('limit', String(params.limit));
+  if (params.offset != null) q.set('offset', String(params.offset));
+  const path = `/feed${q.toString() ? `?${q.toString()}` : ''}`;
+  return req(path, { auth: true });
 }
 
-// комментарий к улову
-export async function addComment(catchId: number|string, text: string) {
-  return http(`${base}/catch/${catchId}/comments`, { method:'POST', body:{ text } });
+export async function catchById(id: number | string) {
+  return req(`/catch/${id}`, { auth: true });
 }
 
-// профиль
-export async function profileMe() {
-  return http(`${base}/profile/me`, { method:'GET' });
+export async function addComment(catchId: number | string, text: string) {
+  return req(`/catch/${catchId}/comments`, {
+    method: 'POST',
+    auth: true,
+    body: { text },
+  });
 }
 
-// уведомления
-export async function notifications() {
-  return http(`${base}/notifications`, { method:'GET' });
+// Лайк улова
+export async function likeCatch(catchId: number | string) {
+  return req(`/catch/${catchId}/like`, { method: 'POST', auth: true });
 }
 
-// сохранение избранной точки для погоды (только для авторизованных)
-export async function saveWeatherFav(lat: number, lng: number, label?: string) {
-  if (config.auth?.requireAuthForWeatherSave && !isAuthed()) {
-    const err: any = new Error('Требуется авторизация для сохранения точки погоды');
-    err.code = 'AUTH_REQUIRED';
-    throw err;
-  }
-  return http(`${base}/weather/favs`, { method:'POST', body:{ lat, lng, label } });
+// Рейтинг улова (звёзды и т.п.)
+export async function rateCatch(catchId: number | string, value: number) {
+  return req(`/catch/${catchId}/rate`, {
+    method: 'POST',
+    auth: true,
+    body: { value },
+  });
 }
 
-// получить избранные точки погоды
+// Начисление бонусов (по действию)
+export async function bonusAward(action: string, payload: Record<string, any> = {}) {
+  return req(`/bonus/award`, {
+    method: 'POST',
+    auth: true,
+    body: { action, ...payload },
+  });
+}
+
+/** ====== MAP / POINTS ====== */
+export type Bbox = [number, number, number, number];
+
+export async function points(params: { limit?: number; bbox?: Bbox; filter?: string } = {}) {
+  const q = new URLSearchParams();
+  if (params.limit != null) q.set('limit', String(params.limit));
+  if (params.filter) q.set('filter', params.filter);
+  if (params.bbox) q.set('bbox', params.bbox.join(','));
+  const path = `/map/points${q.toString() ? `?${q.toString()}` : ''}`;
+  return req(path, { auth: true });
+}
+
+export async function addPlace(body: {
+  name: string;
+  lat: number;
+  lng: number;
+  description?: string;
+  photos?: string[];
+  privacy?: 'all' | 'friends' | 'me';
+}) {
+  return req(`/points`, { method: 'POST', auth: true, body });
+}
+
+export async function placeById(id: number | string) {
+  return req(`/points/${id}`, { auth: true });
+}
+
+/** ====== ADD CATCH ====== */
+export async function addCatch(body: {
+  lat: number;
+  lng: number;
+  species?: string;
+  length?: number;
+  weight?: number;
+  style?: string;
+  lure?: string;
+  tackle?: string;
+  notes?: string;
+  photo_url?: string;
+  caught_at?: string; // ISO 8601
+  privacy?: 'all' | 'friends' | 'me';
+}) {
+  return req(`/catch`, { method: 'POST', auth: true, body });
+}
+
+/** ====== WEATHER FAVS ====== */
 export async function getWeatherFavs() {
-  return http(`${base}/weather/favs`, { method:'GET' });
+  return req(`/weather/favs`, { auth: true });
 }
 
-// добавление улова (минимально)
-export async function addCatch(payload: {
-  lat:number; lng:number; species?:string; length?:number; weight?:number;
-  method?:string; bait?:string; gear?:string; caption?:string; photo_url?:string; caught_at?:string;
-}) {
-  return http(`${base}/catch`, { method:'POST', body: payload });
+export async function saveWeatherFav(p: { lat: number; lng: number; name?: string }) {
+  return req(`/weather/favs`, { method: 'POST', auth: true, body: p });
 }
 
-// добавление места (минимально)
-export async function addPlace(payload: {
-  lat:number; lng:number; title:string; description?:string; photos?:string[];
-}) {
-  return http(`${base}/map/places`, { method:'POST', body: payload });
+/** ====== PROFILE / NOTIFICATIONS ====== */
+export async function profileMe() {
+  return req(`/profile/me`, { auth: true });
 }
+
+export async function notifications() {
+  return req(`/notifications`, { auth: true });
+}
+
+/** ====== AUTH ====== */
+export async function authLogin(email: string, password: string) {
+  const r = await req<{ token?: string; user?: any }>(`/auth/login`, {
+    method: 'POST',
+    body: { email, password },
+  });
+  if (r?.token) localStorage.setItem('token', r.token);
+  return r;
+}
+
+export async function authRegister(payload: {
+  email: string;
+  password: string;
+  name?: string;
+  login?: string;
+  agree_personal_data: boolean;
+  agree_terms: boolean;
+}) {
+  const r = await req<{ token?: string; user?: any }>(`/auth/register`, {
+    method: 'POST',
+    body: payload,
+  });
+  if (r?.token) localStorage.setItem('token', r.token);
+  return r;
+}
+
+export async function authLogout() {
+  try { await req(`/auth/logout`, { method: 'POST', auth: true }); } catch {}
+  localStorage.removeItem('token');
+  return { ok: true };
+}
+
+/** ====== BANNERS (опционально, для централизованного вызова) ====== */
+export async function bannersGet(slot: string, limit = 1) {
+  const q = new URLSearchParams({ slot, limit: String(limit) });
+  return req(`/banners?${q.toString()}`, { auth: false });
+}
+
+export default {
+  // feed
+  feed,
+  catchById,
+  addComment,
+  likeCatch,
+  rateCatch,
+  bonusAward,
+  addCatch,
+  // map/points
+  points,
+  addPlace,
+  placeById,
+  // weather
+  getWeatherFavs,
+  saveWeatherFav,
+  // profile / notifications
+  profileMe,
+  notifications,
+  // auth
+  authLogin,
+  authRegister,
+  authLogout,
+  // banners
+  bannersGet,
+};
