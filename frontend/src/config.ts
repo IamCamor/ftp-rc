@@ -1,121 +1,33 @@
-type IconsConfig = {
-  // имена для Material Symbols Rounded
-  logo?: string;
-  weather?: string;
-  bell?: string;
-  add?: string;
-  map?: string;
-  feed?: string;
-  profile?: string;
-  like?: string;
-  comment?: string;
-  share?: string;
-};
-
-type FeatureFlags = {
-  auth: {
-    local: boolean;
-    oauthGoogle: boolean;
-    oauthVk: boolean;
-    oauthYandex: boolean;
-    oauthApple: boolean;
-    requireAgreementOnSignup: boolean;
-  };
-  ui: {
-    glass: boolean;
-    showWeatherLinkInHeader: boolean;
-  };
-  weather: {
-    allowSavePoint: boolean;
-    requireAuthForWeatherSave: boolean;
-  };
-};
-
-export type AppConfig = {
-  appName: string;
-  apiBase: string;   // e.g. https://api.fishtrackpro.ru/api/v1
-  authBase: string;  // e.g. https://api.fishtrackpro.ru
-  legal: {
-    termsUrl: string;
-    privacyUrl: string;
-    offerUrl: string;
-  };
+const config = {
+  apiBase: (import.meta as any).env?.VITE_API_BASE ?? 'https://api.fishtrackpro.ru/api/v1',
+  siteBase: (import.meta as any).env?.VITE_SITE_BASE ?? 'https://www.fishtrackpro.ru',
   assets: {
-    logoUrl: string;
-    defaultAvatar: string;
-    bgPattern?: string;
-  };
-  icons: IconsConfig;
-  features: FeatureFlags;
-};
-
-// ❗ Отредактируйте при необходимости URL-ы для прод/стейдж:
-const config: AppConfig = {
-  appName: "FishTrack Pro",
-  apiBase: (typeof window !== 'undefined'
-    ? (window as any).__API_BASE__
-    : "") || "https://api.fishtrackpro.ru/api/v1",
-  authBase: (typeof window !== 'undefined'
-    ? (window as any).__AUTH_BASE__
-    : "") || "https://api.fishtrackpro.ru",
-
+    logoUrl: '/logo.svg',
+    defaultAvatar: '/default-avatar.png',
+  },
+  flags: {
+    glass: true,
+    // если на бэке нет ручек /api/v1/auth/login|register — выключаем password auth
+    authPasswordEnabled: false,
+    authOAuthEnabled: true,
+    notificationsEnabled: false, // включите, когда появится /api/v1/notifications
+    profileEnabled: false,        // включите, когда появится /api/v1/profile/me
+    requireAuthForWeatherSave: false,
+  },
   legal: {
-    termsUrl: "https://www.fishtrackpro.ru/legal/terms",
-    privacyUrl: "https://www.fishtrackpro.ru/legal/privacy",
-    offerUrl: "https://www.fishtrackpro.ru/legal/offer",
+    privacyConsentUrl: '/legal/privacy',
+    offerUrl: '/legal/offer',
+    rulesUrl: '/legal/rules',
   },
-
-  assets: {
-    logoUrl: "/static/logo.svg",
-    defaultAvatar: "/static/default-avatar.png",
-    bgPattern: "/static/pattern.png",
+  providers: {
+    google:  { enabled: true,  path: '/auth/google/redirect' },
+    vk:      { enabled: true,  path: '/auth/vk/redirect' },
+    yandex:  { enabled: true,  path: '/auth/yandex/redirect' },
+    apple:   { enabled: true,  path: '/auth/apple/redirect' },
   },
-
-  icons: {
-    logo: "waves",
-    weather: "partly_cloudy_day",
-    bell: "notifications",
-    add: "add",
-    map: "map",
-    feed: "dynamic_feed",
-    profile: "account_circle",
-    like: "favorite",
-    comment: "chat",
-    share: "share",
-  },
-
-  features: {
-    auth: {
-      local: true,
-      oauthGoogle: true,
-      oauthVk: true,
-      oauthYandex: true,
-      oauthApple: true,
-      requireAgreementOnSignup: true,
-    },
-    ui: {
-      glass: true,
-      showWeatherLinkInHeader: true,
-    },
-    weather: {
-      allowSavePoint: true,
-      requireAuthForWeatherSave: true,
-    },
+  banners: {
+    enabled: true,
+    slots: ['feed.top','feed.bottom','map.bottom'],
   },
 };
-
 export default config;
-
-// --- auto-added feature flags ---
-export const featureFlags = {
-  requireAuthForWeatherSave: true,
-  oauth: {
-    google: true,
-    vk: true,
-    yandex: true,
-    apple: true,
-  },
-  banners: true,
-  ratings: true,
-  bonuses: true,
-};

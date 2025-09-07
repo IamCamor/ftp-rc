@@ -1,108 +1,49 @@
 import React, { useEffect, useState } from 'react';
+import AppShell from '../components/AppShell';
+import Icon from '../components/Icon';
 import config from '../config';
+import { notifications } from '../api';
 
-type Notice = {
-  id: number | string;
-  type: string;
-  title?: string;
-  message?: string;
-  created_at?: string;
-  read_at?: string | null;
-};
+type Notice = { id: string|number; title?: string; text?: string; created_at?: string };
 
-const NotificationsPage: React.FC = () => {
-  const [items, setItems] = useState<Notice[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+export default function NotificationsPage(){
+  const [items,setItems] = useState<Notice[]>([]);
+  const [err,setErr] = useState<string| null>(null);
+  const enabled = config.flags.notificationsEnabled;
 
-  useEffect(() => {
-    let alive = true;
-
-    async function load() {
-      setLoading(true);
-      setError(null);
-
-      try {
-        const token = localStorage.getItem('token') || '';
-        const res = await fetch(`${config.apiBase}/notifications`, {
-          headers: {
-            'Accept': 'application/json',
-            ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-          },
-          credentials: 'include',
-        });
-
-        // Бек может вернуть 404, если роут ещё не включён
-        if (!res.ok) {
-          const text = await res.text().catch(() => '');
-          throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
-        }
-
-        const data = await res.json();
-        // Ожидаем массив; если пришёл объект — аккуратно достанем поле
-        const list: Notice[] = Array.isArray(data)
-          ? data
-          : Array.isArray((data as any).data)
-          ? (data as any).data
-          : [];
-
-        if (!alive) return;
-        setItems(list);
-      } catch (e: any) {
-        if (!alive) return;
-        // Частый кейс — CORS/сеть
-        setError(
-          e?.message?.includes('Failed to fetch')
-            ? 'Не удалось загрузить. Проверьте сеть или CORS.'
-            : e?.message || 'Ошибка загрузки уведомлений'
-        );
-      } finally {
-        if (alive) setLoading(false);
+  useEffect(()=>{
+    let aborted = false;
+    (async()=>{
+      setErr(null);
+      if (!enabled){ setItems([]); return; }
+      try{
+        const data = await notifications();
+        if (!aborted) setItems(Array.isArray(data)? data : (data?.items ?? []));
+      }catch(e:any){
+        // если 404 — просто показываем пусто и подсказку
+        setErr(e?.message ?? 'Ошибка загрузки');
       }
-    }
-
-    load();
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  if (loading) {
-    return <div className="container">Загрузка уведомлений…</div>;
-  }
-
-  if (error) {
-    return (
-      <div className="container">
-        <div className="card error">
-          <div className="card-title">Ошибка</div>
-          <div className="card-text">{error}</div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!items || items.length === 0) {
-    return <div className="container">Пока уведомлений нет.</div>;
-  }
+    })();
+    return ()=>{ aborted = true; };
+  },[enabled]);
 
   return (
-    <div className="container">
-      <h1 className="page-title">Уведомления</h1>
-      <ul className="list">
-        {items.map((n) => (
-          <li key={n.id} className="list-item">
-            <div className="list-title">{n.title || n.type}</div>
-            {n.message && <div className="list-subtitle">{n.message}</div>}
-            <div className="list-meta">
-              {n.created_at ? new Date(n.created_at).toLocaleString() : ''}
-              {n.read_at ? ' • прочитано' : ''}
+    <AppShell>
+      <div className="glass card" style={{display:'grid', gap:12}}>
+        <div className="row"><Icon name="notifications" /><b>Уведомления</b></div>
+        {!enabled && <div className="help">Функция пока не активирована (ожидаем роут /api/v1/notifications).</div>}
+        {enabled && err && <div className="help">Не удалось загрузить уведомления: {err}</div>}
+        {enabled && !err && items.length===0 && <div className="help">Уведомлений пока нет.</div>}
+        {enabled && items.map(n=>(
+          <div key={String(n.id)} className="glass card" style={{padding:10}}>
+            <div className="row" style={{justifyContent:'space-between'}}>
+              <b>{n.title ?? 'Уведомление'}</b>
+              {n.created_at && <span className="help">{new Date(n.created_at).toLocaleString()}</span>}
             </div>
-          </li>
+            {n.text && <div style={{marginTop:6}}>{n.text}</div>}
+          </div>
         ))}
-      </ul>
-    </div>
+      </div>
+    </AppShell>
   );
-};
-
-export default NotificationsPage;
+}

@@ -1,35 +1,17 @@
 import React from 'react';
-import { NavLink } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import Icon from './Icon';
-import config from '../config';
 
-const cls = (isActive:boolean) =>
-  `icon-btn ${isActive ? 'glass' : ''}`;
-
-const BottomNav: React.FC = () => {
+export default function BottomNav(){
+  const loc = useLocation();
+  const is = (p:string)=> loc.pathname===p || loc.pathname.startsWith(p+'/');
   return (
-    <nav className="bottom-nav glass" role="navigation" aria-label="bottom navigation">
-      <NavLink to="/" className={({isActive}) => cls(isActive)} aria-label="feed">
-        <Icon name={config.icons.feed || 'dynamic_feed'} />
-      </NavLink>
-
-      <NavLink to="/map" className={({isActive}) => cls(isActive)} aria-label="map">
-        <Icon name={config.icons.map || 'map'} />
-      </NavLink>
-
-      <NavLink to="/add/catch" className={({isActive}) => cls(isActive)} aria-label="add catch">
-        <Icon name={config.icons.add || 'add'} />
-      </NavLink>
-
-      <NavLink to="/alerts" className={({isActive}) => cls(isActive)} aria-label="alerts">
-        <Icon name={config.icons.bell || 'notifications'} />
-      </NavLink>
-
-      <NavLink to="/profile" className={({isActive}) => cls(isActive)} aria-label="profile">
-        <Icon name={config.icons.profile || 'account_circle'} />
-      </NavLink>
+    <nav className="bottom-nav glass">
+      <Link to="/" className={is('/')?'active':''}><Icon name="home" /><span>Лента</span></Link>
+      <Link to="/map" className={is('/map')?'active':''}><Icon name="map" /><span>Карта</span></Link>
+      <Link to="/add/catch" className={is('/add/catch')?'active':''}><Icon name="add_a_photo" /><span>Улов</span></Link>
+      <Link to="/add/place" className={is('/add/place')?'active':''}><Icon name="add_location" /><span>Место</span></Link>
+      <Link to="/profile" className={is('/profile')?'active':''}><Icon name="person" /><span>Профиль</span></Link>
     </nav>
   );
-};
-
-export default BottomNav;
+}

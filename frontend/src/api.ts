@@ -1,327 +1,107 @@
-// Унифицированный API-клиент для фронта.
-// Важно: CORS не трогаем (работает на бэке).
-
 import config from './config';
 
 type Json = any;
+type ReqOpts = { method?: string; body?: any; auth?: boolean; headers?: Record<string,string> };
 
-const apiBase =
-  (config as any)?.api?.v1Base ??
-  (config as any)?.apiBase ??
-  (config as any)?.api?.base ??
-  '/api/v1';
+async function request<T=Json>(path: string, opts: ReqOpts = {}): Promise<T> {
+  const url = path.startsWith('http') ? path : `${config.apiBase}${path}`;
+  const headers: Record<string,string> = { 'Accept':'application/json' };
+  let body: BodyInit | undefined;
 
-function normUrl(path: string) {
-  if (!path.startsWith('/')) path = '/' + path;
-  // если apiBase уже содержит /api/v1 — не дублируем
-  if (apiBase.endsWith('/')) return apiBase.replace(/\/+$/,'') + path;
-  return apiBase + path;
-}
-
-async function req<T = Json>(
-  path: string,
-  opts: RequestInit & { auth?: boolean; formData?: boolean } = {}
-): Promise<T> {
-  const url = normUrl(path);
-  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (opts.body instanceof FormData) {
+    body = opts.body;
+  } else if (opts.body !== undefined) {
+    headers['Content-Type'] = 'application/json';
+    body = JSON.stringify(opts.body);
+  }
 
   const token = localStorage.getItem('token');
-  if (opts.auth && token) headers['Authorization'] = `Bearer ${token}`;
+  if (opts.auth !== false && token) headers['Authorization'] = `Bearer ${token}`;
 
-  let body: BodyInit | undefined = opts.body as any;
-  if (!opts.formData && body && typeof body === 'object') {
-    headers['Content-Type'] = 'application/json';
-    body = JSON.stringify(body);
-  }
-
-  const res = await fetch(url, {
-    method: opts.method || 'GET',
-    credentials: 'include',
-    headers,
-    body,
-    cache: 'no-store',
-  });
-
+  const res = await fetch(url, { method: opts.method ?? 'GET', headers, body, credentials: 'include' });
   if (!res.ok) {
-    // Попробуем отдать JSON с ошибкой
-    let err: any = null;
-    try { err = await res.json(); } catch {}
-    const msg = err?.message || `HTTP ${res.status}`;
-    throw new Error(msg);
+    // Вернём осмысленную ошибку
+    let msg = `HTTP ${res.status}`;
+    try { const j = await res.json(); if (j?.message) msg += `: ${j.message}`; } catch {}
+    const e: any = new Error(msg);
+    e.status = res.status;
+    throw e;
   }
+  try { return await res.json(); } catch { return undefined as any; }
+}
 
-  // Пустой ответ
-  if (res.status === 204) return null as T;
+/** FEED */
+export async function feed(limit=10, offset=0){
+  return request(`/feed?limit=${limit}&offset=${offset}`);
+}
 
-  // JSON или пусто
-  const text = await res.text();
-  if (!text) return null as T;
+/** MAP */
+export async function points(params: {limit?:number; bbox?: string} = {}){
+  const q: string[] = [];
+  if (params.limit) q.push(`limit=${params.limit}`);
+  if (params.bbox)  q.push(`bbox=${encodeURIComponent(params.bbox)}`);
+  const qs = q.length ? `?${q.join('&')}` : '';
+  return request(`/map/points${qs}`);
+}
+export async function pointById(id: string|number){
+  return request(`/map/points/${id}`);
+}
 
+/** CATCH */
+export async function catchById(id: string|number){
+  return request(`/catch/${id}`);
+}
+export async function addCatchComment(id: string|number, text: string){
+  return request(`/catch/${id}/comments`, { method:'POST', body:{ text } });
+}
+export async function likeCatch(id: string|number){
+  return request(`/catch/${id}/like`, { method:'POST' });
+}
+export async function rateCatch(id: string|number, stars: number){
+  return request(`/catch/${id}/rating`, { method:'POST', body:{ stars } });
+}
+export async function bonusAward(kind: string, meta?: any){
+  return request(`/bonus/award`, { method:'POST', body:{ kind, meta } });
+}
+
+/** BANNERS (может отсутствовать на бэке — тогда молча вернём пусто) */
+export async function bannersGet(slot: string){
   try {
-    return JSON.parse(text) as T;
-  } catch {
-    // Если не JSON — вернём как есть
-    return (text as unknown) as T;
+    return await request(`/banners?slot=${encodeURIComponent(slot)}`);
+  } catch (e:any){
+    if (e?.status === 404) return [];
+    throw e;
   }
 }
 
-/** ====== FEED ====== */
-export async function feed(params: { limit?: number; offset?: number } = {}) {
-  const q = new URLSearchParams();
-  if (params.limit != null) q.set('limit', String(params.limit));
-  if (params.offset != null) q.set('offset', String(params.offset));
-  const path = `/feed${q.toString() ? `?${q.toString()}` : ''}`;
-  return req(path, { auth: true });
+/** PROFILE / NOTIFICATIONS — безопасные фолы */
+export async function profileMe(){
+  if (!config.flags.profileEnabled) return null;
+  try { return await request(`/profile/me`); }
+  catch(e:any){ if (e?.status===404) return null; throw e; }
+}
+export async function notifications(){
+  if (!config.flags.notificationsEnabled) return [];
+  try { return await request(`/notifications`); }
+  catch(e:any){ if (e?.status===404) return []; throw e; }
 }
 
-export async function catchById(id: number | string) {
-  return req(`/catch/${id}`, { auth: true });
+/** AUTH */
+export function isAuthed(){ return !!localStorage.getItem('token'); }
+export async function logout(){ localStorage.removeItem('token'); return true; }
+
+// заглушки для password-auth, если на бэке нет /api/v1/auth/*
+export async function login(email: string, password: string){
+  if (!config.flags.authPasswordEnabled) throw new Error('Password auth disabled');
+  return request(`/auth/login`, { method:'POST', body:{ email, password }, auth:false });
+}
+export async function register(payload: {email:string; password:string; login:string; agreePrivacy:boolean; agreeRules:boolean}){
+  if (!config.flags.authPasswordEnabled) throw new Error('Password auth disabled');
+  return request(`/auth/register`, { method:'POST', body:payload, auth:false });
 }
 
-export async function addComment(catchId: number | string, text: string) {
-  return req(`/catch/${catchId}/comments`, {
-    method: 'POST',
-    auth: true,
-    body: { text },
-  });
+// сохранение точки погоды (только для авторизованных, по ТЗ)
+export async function saveWeatherFav(lat:number,lng:number,label?:string){
+  if (!isAuthed()) throw new Error('AUTH_REQUIRED');
+  return request(`/weather/favs`, { method:'POST', body:{ lat,lng,label } });
 }
-
-// Лайк улова
-export async function likeCatch(catchId: number | string) {
-  return req(`/catch/${catchId}/like`, { method: 'POST', auth: true });
-}
-
-// Рейтинг улова (звёзды и т.п.)
-export async function rateCatch(catchId: number | string, value: number) {
-  return req(`/catch/${catchId}/rate`, {
-    method: 'POST',
-    auth: true,
-    body: { value },
-  });
-}
-
-// Начисление бонусов (по действию)
-export async function bonusAward(action: string, payload: Record<string, any> = {}) {
-  return req(`/bonus/award`, {
-    method: 'POST',
-    auth: true,
-    body: { action, ...payload },
-  });
-}
-
-/** ====== MAP / POINTS ====== */
-export type Bbox = [number, number, number, number];
-
-export async function points(params: { limit?: number; bbox?: Bbox; filter?: string } = {}) {
-  const q = new URLSearchParams();
-  if (params.limit != null) q.set('limit', String(params.limit));
-  if (params.filter) q.set('filter', params.filter);
-  if (params.bbox) q.set('bbox', params.bbox.join(','));
-  const path = `/map/points${q.toString() ? `?${q.toString()}` : ''}`;
-  return req(path, { auth: true });
-}
-
-export async function addPlace(body: {
-  name: string;
-  lat: number;
-  lng: number;
-  description?: string;
-  photos?: string[];
-  privacy?: 'all' | 'friends' | 'me';
-}) {
-  return req(`/points`, { method: 'POST', auth: true, body });
-}
-
-export async function placeById(id: number | string) {
-  return req(`/points/${id}`, { auth: true });
-}
-
-/** ====== ADD CATCH ====== */
-export async function addCatch(body: {
-  lat: number;
-  lng: number;
-  species?: string;
-  length?: number;
-  weight?: number;
-  style?: string;
-  lure?: string;
-  tackle?: string;
-  notes?: string;
-  photo_url?: string;
-  caught_at?: string; // ISO 8601
-  privacy?: 'all' | 'friends' | 'me';
-}) {
-  return req(`/catch`, { method: 'POST', auth: true, body });
-}
-
-/** ====== WEATHER FAVS ====== */
-export async function getWeatherFavs() {
-  return req(`/weather/favs`, { auth: true });
-}
-
-export async function saveWeatherFav(p: { lat: number; lng: number; name?: string }) {
-  return req(`/weather/favs`, { method: 'POST', auth: true, body: p });
-}
-
-/** ====== PROFILE / NOTIFICATIONS ====== */
-export async function profileMe() {
-  return req(`/profile/me`, { auth: true });
-}
-
-export async function notifications() {
-  return req(`/notifications`, { auth: true });
-}
-
-/** ====== AUTH ====== */
-export async function authLogin(email: string, password: string) {
-  const r = await req<{ token?: string; user?: any }>(`/auth/login`, {
-    method: 'POST',
-    body: { email, password },
-  });
-  if (r?.token) localStorage.setItem('token', r.token);
-  return r;
-}
-
-export async function authRegister(payload: {
-  email: string;
-  password: string;
-  name?: string;
-  login?: string;
-  agree_personal_data: boolean;
-  agree_terms: boolean;
-}) {
-  const r = await req<{ token?: string; user?: any }>(`/auth/register`, {
-    method: 'POST',
-    body: payload,
-  });
-  if (r?.token) localStorage.setItem('token', r.token);
-  return r;
-}
-
-export async function authLogout() {
-  try { await req(`/auth/logout`, { method: 'POST', auth: true }); } catch {}
-  localStorage.removeItem('token');
-  return { ok: true };
-}
-
-/** ====== BANNERS (опционально, для централизованного вызова) ====== */
-export async function bannersGet(slot: string, limit = 1) {
-  const q = new URLSearchParams({ slot, limit: String(limit) });
-  return req(`/banners?${q.toString()}`, { auth: false });
-}
-
-export function isAuthed(): boolean {
-  try { return !!localStorage.getItem('token'); } catch { return false }
-}
-
-export default {
-  // feed
-  feed,
-  catchById,
-  addComment,
-  likeCatch,
-  rateCatch,
-  bonusAward,
-  addCatch,
-  // map/points
-  points,
-  addPlace,
-  placeById,
-  // weather
-  getWeatherFavs,
-  saveWeatherFav,
-  // profile / notifications
-  profileMe,
-  notifications,
-  // auth
-  authLogin,
-  authRegister,
-  authLogout,
-    isAuthed,
-  // banners
-  bannersGet,
-};
-/**
- * Завершение сессии пользователя.
- * Отправляем POST /auth/logout (мягко), игнорируем сетевые ошибки,
- * затем чистим localStorage и возвращаем {ok:true}.
- * Требует, чтобы в файле выше был определён `const base = config.apiBase`.
- */
-export async function logout(): Promise<{ok: boolean}> {
-  const token = typeof localStorage !== 'undefined' ? localStorage.getItem('token') : null;
-  try {
-    // Мягкий вызов backend — если роут отключён/вернёт ошибку, просто игнорируем
-    await fetch(`${base}/auth/logout`, {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-      },
-      credentials: 'include',
-    });
-  } catch (_e) {
-    // ignore
-  }
-  try {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.removeItem('token');
-    }
-  } catch (_e) {
-    // ignore
-  }
-  return { ok: true };
-}
-
-// --- auto-added: addCatchComment ---
-/**
- * Добавить комментарий к улову
- * POST /catch/{id}/comments
- * Бек ожидает JSON с текстом комментария. Чаще всего поле называется "text".
- */
-export async function addCatchComment(
-  catchId: number | string,
-  text: string
-): Promise<any> {
-  const url = `${base}/catch/${catchId}/comments`;
-  const token = (typeof localStorage !== 'undefined') ? localStorage.getItem('token') : null;
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Accept': 'application/json',
-      'Content-Type': 'application/json',
-      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-    },
-    credentials: 'include',
-    body: JSON.stringify({ text }),
-  });
-
-  // Если валидация на беке требует другое имя поля (например, "message"),
-  // можно попробовать повторить с fallback:
-  if (res.status === 422) {
-    // попробуем "message" вместо "text"
-    const retry = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-      },
-      credentials: 'include',
-      body: JSON.stringify({ message: text }),
-    });
-    if (!retry.ok) {
-      const t = await retry.text().catch(() => '');
-      throw new Error(`addCatchComment failed: ${retry.status} ${retry.statusText} ${t}`);
-    }
-    try { return await retry.json(); } catch { return { ok: true }; }
-  }
-
-  if (!res.ok) {
-    const t = await res.text().catch(() => '');
-    throw new Error(`addCatchComment failed: ${res.status} ${res.statusText} ${t}`);
-  }
-  try { return await res.json(); } catch { return { ok: true }; }
-}
-// --- /auto-added: addCatchComment ---

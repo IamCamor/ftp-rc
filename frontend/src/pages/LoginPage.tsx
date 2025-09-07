@@ -1,51 +1,46 @@
-import React, { useState } from 'react';
-import { login } from '../api';
-import { useNavigate, Link } from 'react-router-dom';
-import Icon from '../components/Icon';
-import SocialAuth from '../components/SocialAuth';
+import React from 'react';
 import config from '../config';
-import { pushToast } from '../components/Toast';
+import AppShell from '../components/AppShell';
+import Icon from '../components/Icon';
 
-const LoginPage: React.FC = () => {
-  const nav = useNavigate();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
+export default function LoginPage(){
+  const oauth = config.flags.authOAuthEnabled;
+  const pwd   = config.flags.authPasswordEnabled;
 
-  async function onSubmit(e:React.FormEvent){
-    e.preventDefault();
-    setErr(''); setBusy(true);
-    try{
-      await login(email, password);
-      pushToast('Добро пожаловать!');
-      nav('/feed', { replace:true });
-    }catch(e:any){
-      setErr(e?.message || 'Не удалось войти');
-    }finally{ setBusy(false); }
-  }
+  const go = (path: string) => {
+    const base = config.siteBase.replace(/\/+$/,'');
+    const api = config.apiBase.replace(/\/api\/v1$/,''); // перейти на корень api-домена
+    window.location.href = `${api}${path}`;
+  };
 
   return (
-    <div className="container" style={{maxWidth:560}}>
-      <h2 className="h2">Вход</h2>
-      <form onSubmit={onSubmit} className="glass card grid">
-        <label>Email</label>
-        <input className="input" type="email" required value={email} onChange={e=>setEmail(e.target.value)} />
-        <label>Пароль</label>
-        <input className="input" type="password" required value={password} onChange={e=>setPassword(e.target.value)} />
-        {err && <div className="muted" style={{color:'#ffb4b4'}}>{err}</div>}
-        <button className="btn primary" disabled={busy}><Icon name={config.icons.login}/> Войти</button>
-      </form>
+    <AppShell>
+      <div className="glass card" style={{maxWidth:520, margin:'12px auto', display:'grid', gap:12}}>
+        <div className="row"><Icon name="login" /><b>Вход в аккаунт</b></div>
+        {oauth && (
+          <div style={{display:'grid',gap:8}}>
+            {config.providers.google.enabled && (
+              <button className="btn ghost" onClick={()=>go(config.providers.google.path)}><Icon name="google" /> Войти через Google</button>
+            )}
+            {config.providers.vk.enabled && (
+              <button className="btn ghost" onClick={()=>go(config.providers.vk.path)}><Icon name="language" /> Войти через VK</button>
+            )}
+            {config.providers.yandex.enabled && (
+              <button className="btn ghost" onClick={()=>go(config.providers.yandex.path)}><Icon name="travel_explore" /> Войти через Яндекс</button>
+            )}
+            {config.providers.apple.enabled && (
+              <button className="btn ghost" onClick={()=>go(config.providers.apple.path)}><Icon name="apple" /> Войти через Apple</button>
+            )}
+          </div>
+        )}
 
-      <div className="glass card" style={{marginTop:12}}>
-        <div style={{marginBottom:8, fontWeight:600}}>Быстрый вход</div>
-        <SocialAuth/>
-      </div>
+        {!oauth && !pwd && (
+          <div className="help">Авторизация временно недоступна (отключена флагами).</div>
+        )}
 
-      <div className="muted" style={{marginTop:12}}>
-        Нет аккаунта? <Link to="/register">Зарегистрироваться</Link>
+        <div className="sep" />
+        <a href="/register" className="btn primary"><Icon name="how_to_reg" /> Регистрация</a>
       </div>
-    </div>
+    </AppShell>
   );
-};
-export default LoginPage;
+}
