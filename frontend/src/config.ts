@@ -21,6 +21,7 @@ export type AppConfig = {
 
 const config: AppConfig = {
   apiBase: 'https://api.fishtrackpro.ru/api/v1',
+  authBase: 'https://api.fishtrackpro.ru',
   siteBase: 'https://www.fishtrackpro.ru',
   images: {
     logoUrl: '/assets/logo.svg',

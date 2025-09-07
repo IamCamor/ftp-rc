@@ -126,15 +126,41 @@ export async function addPlace(payload: {
 }
 
 // auth
-export async function login(email: string, password: string) {
-  const r = await http<{token:string}>(`${base}/auth/login`, {method:'POST', body:{email,password}, auth:false});
+/* replaced by patch */>(`${base}/auth/login`, {method:'POST', body:{email,password}, auth:false});
   if (r?.token) localStorage.setItem('token', r.token);
   return r;
 }
-export async function register(name: string, email: string, password: string) {
-  const r = await http<{token:string}>(`${base}/auth/register`, {method:'POST', body:{name,email,password}, auth:false});
+/* replaced by patch */>(`${base}/auth/register`, {method:'POST', body:{name,email,password}, auth:false});
   if (r?.token) localStorage.setItem('token', r.token);
   return r;
 }
 export function logout(){ try { localStorage.removeItem('token'); } catch {} }
 export function isAuthed(){ return !!getToken(); }
+const authBase = config.authBase;
+
+// ---- AUTH (patched) ----
+export async function login(email:string, password:string){
+  const r = await (await import('./api')).defaultFetch?.(`${config.authBase}/auth/login`)?.catch?.(()=>null);
+  // если defaultFetch отсутствует — используем локальный http:
+  // @ts-ignore
+  if(!r){
+    const http = (await import('./api')).http || (async (u:string,o:any)=> { const res=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(o.body)}); return res.json(); });
+  }
+  // финальная реализация
+  const res = await fetch(`${config.authBase}/auth/login`, {method:'POST', headers:{'Content-Type':'application/json','Accept':'application/json'}, body: JSON.stringify({email,password})});
+  const data = await res.json();
+  if(!res.ok) throw new Error(data?.message||'Login failed');
+  if(data?.token) localStorage.setItem('token', data.token);
+  return data;
+}
+export async function register(name:string, email:string, password:string, username?:string, avatarUrl?:string){
+  const body:any={name,email,password}; if(username) body.username=username; if(avatarUrl) body.photo_url=avatarUrl;
+  const res = await fetch(`${config.authBase}/auth/register`, {method:'POST', headers:{'Content-Type':'application/json','Accept':'application/json'}, body: JSON.stringify(body)});
+  const data = await res.json();
+  if(!res.ok) throw new Error(data?.message||'Register failed');
+  if(data?.token) localStorage.setItem('token', data.token);
+  return data;
+}
+export function oauthStart(provider:'google'|'vk'|'yandex'|'apple'){
+  window.location.href = `${config.authBase}/auth/${provider}/redirect`;
+}
