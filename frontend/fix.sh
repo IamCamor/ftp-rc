@@ -1,618 +1,1002 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${PWD}/frontend"
-SRC="${ROOT}/src"
-CMP="${SRC}/components"
-PAGES="${SRC}/pages"
-STY="${SRC}/styles"
+ROOT="$(pwd)"
+SRC="$ROOT/src"
+[ -d "$ROOT/frontend/src" ] && SRC="$ROOT/frontend/src"
 
-need() { [[ -d "$1" ]] || { echo "❌ Не найден каталог: $1"; exit 1; }; }
-need "$SRC"; need "$CMP"; need "$PAGES"; need "$STY"
+mkdir -p "$SRC/components" "$SRC/pages" "$SRC/styles" "$SRC/utils" "$SRC/assets"
 
 ############################################
-# 1) config.ts — базовый конфиг и размеры UI
+# 1) Расширяем config.ts: новые иконки + слоты баннеров
 ############################################
-cat > "${SRC}/config.ts" <<'TS'
-export const API_BASE = 'https://api.fishtrackpro.ru/api'; // без /v1 — добавим в api.ts
-export const TILES_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
-
-export const ICONS = {
-  // указываем имена иконок из Material Symbols Rounded
-  header: { weather: 'weather_mix', bell: 'notifications', add: 'add_circle', profile: 'account_circle' },
-  bottom: { feed: 'home', map: 'map', addCatch: 'add_photo_alternate', addPlace: 'add_location', alerts: 'notifications', profile: 'person' },
-  actions: { like: 'favorite', comment: 'mode_comment', share: 'share', open: 'open_in_new', weatherSave: 'cloud_download' },
+cat > "$SRC/config.ts" <<'TS'
+export type AppConfig = {
+  apiBase: string;
+  siteBase: string;
+  images: {
+    logoUrl: string;
+    defaultAvatar: string;
+    backgroundPattern: string;
+  };
+  icons: {
+    like: string;
+    comment: string;
+    share: string;
+    map: string;
+    add: string;
+    alerts: string;
+    profile: string;
+    weather: string;
+    home: string;
+    star: string;
+    gift: string;
+    friends: string;
+    settings: string;
+    leaderboard: string;
+    ad: string;
+  };
+  banners: {
+    // через сколько элементов ленты вставлять баннер-слот
+    feedEvery: number;
+  }
 };
 
-export const UI_DIMENSIONS = { header: 56, bottomNav: 64 };
+const config: AppConfig = {
+  apiBase: 'https://api.fishtrackpro.ru/api/v1',
+  siteBase: 'https://www.fishtrackpro.ru',
+  images: {
+    logoUrl: '/assets/logo.svg',
+    defaultAvatar: '/assets/default-avatar.png',
+    backgroundPattern: '/assets/bg-pattern.png',
+  },
+  icons: {
+    like: 'favorite',
+    comment: 'chat_bubble',
+    share: 'share',
+    map: 'map',
+    add: 'add_location_alt',
+    alerts: 'notifications',
+    profile: 'account_circle',
+    weather: 'partly_cloudy_day',
+    home: 'home',
+    star: 'star',
+    gift: 'redeem',
+    friends: 'group',
+    settings: 'settings',
+    leaderboard: 'military_tech',
+    ad: 'brand_awareness',
+  },
+  banners: {
+    feedEvery: 5
+  }
+};
+
+export default config;
 TS
 
-#############################
-# 2) styles/app.css — Material Icons + glass
-#############################
-cat > "${STY}/app.css" <<'CSS'
-@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,300..700,0..1,-50..200');
+############################################
+# 2) Дополняем api.ts: рейтинг, друзья, баннеры, бонусы, настройки
+############################################
+cat > "$SRC/api.ts" <<'TS'
+import config from './config';
 
-.material-symbols-rounded {
-  font-family: 'Material Symbols Rounded';
-  font-weight: normal;
-  font-style: normal;
-  font-size: 24px; /* Adjust as needed */
-  line-height: 1;
-  letter-spacing: normal;
-  text-transform: none;
-  display: inline-block;
-  white-space: nowrap;
-  direction: ltr;
-  -webkit-font-feature-settings: 'liga';
-  -webkit-font-smoothing: antialiased;
-  /* вариативные оси (важно: порядок осей соответствует CSS @import выше) */
-  font-variation-settings: 'opsz' 24, 'wght' 400, 'FILL' 0, 'GRAD' 0;
+type HttpOptions = {
+  method?: 'GET'|'POST'|'PUT'|'PATCH'|'DELETE';
+  body?: any;
+  auth?: boolean;
+  headers?: Record<string,string>;
+};
+
+function getToken(): string | null {
+  try { return localStorage.getItem('token'); } catch { return null; }
 }
 
-/* простая сетка и стек карт */
-:root {
-  --bg: #0b1220;
-  --glass-bg: rgba(255,255,255,0.06);
-  --glass-border: rgba(255,255,255,0.12);
-  --txt: #eaf0ff;
-  --muted: #a7b0c6;
-  --accent: #7cc1ff;
+async function http<T=any>(url: string, opts: HttpOptions = {}): Promise<T> {
+  const { method='GET', body, auth=true, headers={} } = opts;
+  const token = getToken();
+
+  const res = await fetch(url, {
+    method,
+    mode: 'cors',
+    credentials: 'omit',
+    headers: {
+      'Accept': 'application/json',
+      ...(body ? {'Content-Type': 'application/json'} : {}),
+      ...(auth && token ? { 'Authorization': `Bearer ${token}` } : {}),
+      ...headers,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  if (res.status === 204) return undefined as unknown as T;
+
+  let data: any = null;
+  const text = await res.text().catch(()=> '');
+  try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+
+  if (!res.ok) {
+    const msg = (data && (data.message || data.error)) || `${res.status} ${res.statusText}`;
+    throw new Error(msg);
+  }
+  return data as T;
 }
 
-html, body, #root { height: 100%; }
-body { margin: 0; background: radial-gradient(1200px 800px at 20% -10%, rgba(124,193,255,0.10), transparent 60%), var(--bg); color: var(--txt); font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji','Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'; }
-
-a { color: var(--accent); text-decoration: none; }
-a:hover { text-decoration: underline; }
-
-.glass { background: var(--glass-bg); border: 1px solid var(--glass-border); backdrop-filter: blur(10px); border-radius: 16px; }
-.glass-light { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14); backdrop-filter: blur(8px); border-radius: 10px; }
-.card { padding: 12px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.03); }
-
-.header { position: sticky; top: 0; z-index: 50; height: 56px; display: grid; grid-template-columns: 1fr auto auto auto; align-items: center; gap: 8px; padding: 8px 12px; }
-.header .brand { font-weight: 600; letter-spacing: 0.2px; }
-
-.bottom-nav { position: fixed; left: 0; right: 0; bottom: 0; height: 64px; display: grid; grid-template-columns: repeat(5, 1fr); align-items: center; gap: 4px; padding: 8px; z-index: 50; }
-.bottom-nav a { color: var(--txt); opacity: 0.8; text-align: center; font-size: 12px; }
-.bottom-nav a.active { opacity: 1; color: white; }
-
-.btn { padding: 10px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.18); background: rgba(255,255,255,0.08); color: var(--txt); cursor: pointer; }
-.btn:disabled { opacity: 0.5; cursor: default; }
-
-.leaflet-container { background: #0a0f1b; }
-CSS
-
-##################################
-# 3) components/Icon.tsx — универсальная иконка
-##################################
-cat > "${CMP}/Icon.tsx" <<'TSX'
-import React from 'react';
-
-type Props = { name: string; size?: number; fill?: 0|1; weight?: number; grad?: number; className?: string; style?: React.CSSProperties };
-
-export default function Icon({ name, size=24, fill=0, weight=400, grad=0, className='', style }: Props) {
-  const styles: React.CSSProperties = {
-    fontVariationSettings: `'opsz' ${size}, 'wght' ${weight}, 'FILL' ${fill}, 'GRAD' ${grad}`,
-    fontSize: size,
-    ...style,
-  };
-  return <span className={`material-symbols-rounded ${className}`} style={styles} aria-hidden="true">{name}</span>;
+function unwrap<T=any>(x: any, fallback: T): T {
+  if (x == null) return fallback;
+  if (Array.isArray(x)) return x as T;
+  if (typeof x === 'object' && Array.isArray((x as any).data)) return (x as any).data as T;
+  return x as T;
 }
-TSX
 
-##################################
-# 4) components/Header.tsx — шапка с кнопками (погода/уведомления/профиль)
-##################################
-cat > "${CMP}/Header.tsx" <<'TSX'
-import React from 'react';
+const base = config.apiBase;
+
+/** FEED */
+export async function feed(params: {limit?: number; offset?: number} = {}) {
+  const q = new URLSearchParams();
+  if (params.limit) q.set('limit', String(params.limit));
+  if (params.offset) q.set('offset', String(params.offset));
+  const r = await http<any>(`${base}/feed${q.toString()?`?${q.toString()}`:''}`);
+  return unwrap<any[]>(r, []);
+}
+
+/** MAP */
+export async function points(bbox?: string, limit = 500) {
+  const q = new URLSearchParams();
+  q.set('limit', String(limit));
+  if (bbox) q.set('bbox', bbox);
+  const r = await http<any>(`${base}/map/points?${q.toString()}`);
+  return unwrap<any[]>(r, []);
+}
+
+/** DETAILS */
+export async function catchById(id: string|number){ return await http<any>(`${base}/catch/${id}`); }
+export async function placeById(id: string|number){ return await http<any>(`${base}/place/${id}`); }
+
+/** INTERACTIONS */
+export async function addCatchComment(id:number|string, text:string){
+  return await http(`${base}/catch/${id}/comments`, {method:'POST', body:{text}});
+}
+export async function likeCatch(id:number|string){
+  return await http(`${base}/catch/${id}/like`, {method:'POST'});
+}
+
+/** NOTIFICATIONS */
+export async function notifications() {
+  const r = await http<any>(`${base}/notifications`);
+  return unwrap<any[]>(r, []);
+}
+
+/** PROFILE */
+export async function profileMe(){ return await http<any>(`${base}/profile/me`); }
+
+/** WEATHER FAVS (local) */
+export function getWeatherFavs(): Array<{lat:number; lng:number; title?:string; id?:string|number}> {
+  try {
+    const raw = localStorage.getItem('weather_favs');
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+export function saveWeatherFav(p: {lat:number; lng:number; title?:string}) {
+  const list = getWeatherFavs();
+  list.push(p);
+  try { localStorage.setItem('weather_favs', JSON.stringify(list)); } catch {}
+  return list;
+}
+
+/** ADD CATCH / PLACE */
+export async function addCatch(payload: {
+  species?: string; length?: number; weight?: number;
+  style?: string; lure?: string; tackle?: string;
+  notes?: string; photo_url?: string;
+  lat?: number; lng?: number; caught_at?: string;
+  privacy?: 'all'|'friends'|'private';
+}) {
+  return await http(`${base}/catch`, {method:'POST', body: payload});
+}
+
+export async function addPlace(payload: {
+  title: string; description?: string;
+  lat: number; lng: number;
+  photos?: string[];
+}) {
+  return await http(`${base}/place`, {method:'POST', body: payload});
+}
+
+/** AUTH */
+export async function login(email: string, password: string) {
+  const r = await http<{token:string}>(`${base}/auth/login`, {method:'POST', body:{email,password}, auth:false});
+  if (r?.token) localStorage.setItem('token', r.token);
+  return r;
+}
+export async function register(name: string, email: string, password: string) {
+  const r = await http<{token:string}>(`${base}/auth/register`, {method:'POST', body:{name,email,password}, auth:false});
+  if (r?.token) localStorage.setItem('token', r.token);
+  return r;
+}
+export function logout(){ try { localStorage.removeItem('token'); } catch {} }
+export function isAuthed(){ return !!getToken(); }
+
+/** RATINGS */
+export async function rateCatch(catchId: string|number, stars: number){
+  return await http(`${base}/catch/${catchId}/rating`, {method:'POST', body:{stars}});
+}
+export async function leaderboard(limit=20){
+  const r = await http<any>(`${base}/leaderboard?limit=${limit}`);
+  return unwrap<any[]>(r, []);
+}
+
+/** FRIENDS */
+export async function friendsList(){
+  const r = await http<any>(`${base}/friends`);
+  return unwrap<any[]>(r, []);
+}
+export async function friendRequest(email: string){
+  return await http(`${base}/friends/request`, {method:'POST', body:{email}});
+}
+export async function friendApprove(requestId: string|number){
+  return await http(`${base}/friends/approve`, {method:'POST', body:{request_id:requestId}});
+}
+export async function friendRemove(userId: string|number){
+  return await http(`${base}/friends/remove`, {method:'POST', body:{user_id:userId}});
+}
+
+/** BANNERS */
+export async function bannersGet(slot: string){
+  const r = await http<any>(`${base}/banners?slot=${encodeURIComponent(slot)}`);
+  return unwrap<any[]>(r, []);
+}
+
+/** BONUSES */
+export async function bonusBalance(){
+  return await http<any>(`${base}/bonuses/balance`);
+}
+export async function bonusHistory(limit=50){
+  const r = await http<any>(`${base}/bonuses/history?limit=${limit}`);
+  return unwrap<any[]>(r, []);
+}
+/** Пример начисления за действие (like/share/add) — если бэк готов */
+export async function bonusAward(action: 'like'|'share'|'add_catch'|'add_place', meta?: any){
+  return await http<any>(`${base}/bonuses/award`, {method:'POST', body:{action, meta}});
+}
+
+/** SETTINGS */
+export async function settingsGet(){
+  return await http<any>(`${base}/settings`);
+}
+export async function settingsUpdate(patch: any){
+  return await http<any>(`${base}/settings`, {method:'PATCH', body:patch});
+}
+TS
+
+############################################
+# 3) Общие компоненты: RatingStars, BannerSlot, Toast
+############################################
+cat > "$SRC/components/RatingStars.tsx" <<'TS'
+import React, { useState } from 'react';
 import Icon from './Icon';
-import { ICONS } from '../config';
 
-export default function Header() {
+const clamp = (n:number, a=1, b=5)=> Math.max(a, Math.min(b, n));
+
+const RatingStars: React.FC<{
+  value?: number;
+  onChange?: (v:number)=>void;
+  size?: number;
+}> = ({value=0, onChange, size=22}) => {
+  const [hover, setHover] = useState<number|null>(null);
+  const v = clamp(Math.round(hover ?? value), 0, 5);
   return (
-    <div className="header glass">
-      <div className="brand"><a href="/feed">FishTrack<span style={{opacity:.6}}>Pro</span></a></div>
-      <a href="/weather" title="Погода" aria-label="Погода"><Icon name={ICONS.header.weather} /></a>
-      <a href="/alerts" title="Уведомления" aria-label="Уведомления"><Icon name={ICONS.header.bell} /></a>
-      <a href="/profile" title="Профиль" aria-label="Профиль"><Icon name={ICONS.header.profile} /></a>
+    <div className="row" role="radiogroup" aria-label="Оценка">
+      {[1,2,3,4,5].map(i=>(
+        <button
+          key={i}
+          type="button"
+          className="btn"
+          style={{padding:'6px 8px'}}
+          aria-checked={v>=i}
+          role="radio"
+          onMouseEnter={()=>setHover(i)}
+          onMouseLeave={()=>setHover(null)}
+          onClick={()=> onChange?.(i)}
+          title={`${i} из 5`}
+        >
+          <Icon name={v>=i? 'star':'star_rate'} size={size} />
+        </button>
+      ))}
     </div>
   );
-}
-TSX
+};
+export default RatingStars;
+TS
 
-##################################
-# 5) components/BottomNav.tsx — нижнее меню (без #)
-##################################
-cat > "${CMP}/BottomNav.tsx" <<'TSX'
-import React from 'react';
+cat > "$SRC/components/BannerSlot.tsx" <<'TS'
+import React, { useEffect, useState } from 'react';
+import { bannersGet } from '../api';
+import config from '../config';
 import Icon from './Icon';
-import { ICONS } from '../config';
 
-const items = [
-  { href:'/feed', label:'Лента', icon: ICONS.bottom.feed },
-  { href:'/map', label:'Карта', icon: ICONS.bottom.map },
-  { href:'/add-catch', label:'Улов', icon: ICONS.bottom.addCatch },
-  { href:'/add-place', label:'Место', icon: ICONS.bottom.addPlace },
-  { href:'/alerts', label:'Алерты', icon: ICONS.bottom.alerts },
-];
+const BannerSlot: React.FC<{slot: string}> = ({slot}) => {
+  const [items, setItems] = useState<any[]>([]);
+  const [err, setErr] = useState('');
 
-export default function BottomNav(){
-  const path = typeof window !== 'undefined' ? window.location.pathname : '';
+  useEffect(()=>{
+    bannersGet(slot)
+      .then(r => setItems(Array.isArray(r)? r : []))
+      .catch(e => setErr(e.message||''));
+  },[slot]);
+
+  if (err) {
+    // Тихо не мешаем UX, просто ничего не показываем
+    return null;
+  }
+  const b = items[0];
+  if (!b) return null;
+
   return (
-    <nav className="bottom-nav glass">
-      {items.map(it=>{
-        const active = path===it.href;
+    <a className="glass card" href={b.click_url || config.siteBase} target="_blank" rel="noreferrer" style={{display:'flex', gap:12, alignItems:'center'}}>
+      <Icon name={config.icons.ad} />
+      <div style={{flex:1}}>
+        <div style={{fontWeight:600}}>{b.title || 'Реклама'}</div>
+        {b.text && <div className="muted">{b.text}</div>}
+      </div>
+      {b.image_url && <img src={b.image_url} alt="" style={{width:64, height:64, objectFit:'cover', borderRadius:8}}/>}
+    </a>
+  );
+};
+
+export default BannerSlot;
+TS
+
+cat > "$SRC/components/Toast.tsx" <<'TS'
+import React, { useEffect, useState } from 'react';
+
+let pushImpl: ((msg:string)=>void) | null = null;
+export function pushToast(msg:string){ pushImpl?.(msg); }
+
+const ToastHost: React.FC = () => {
+  const [list, setList] = useState<Array<{id:number; text:string}>>([]);
+  useEffect(()=>{
+    pushImpl = (text: string)=>{
+      const id = Date.now() + Math.random();
+      setList(prev => [...prev, {id, text}]);
+      setTimeout(()=> setList(prev => prev.filter(x=>x.id!==id)), 3000);
+    };
+    return ()=>{ pushImpl = null; };
+  },[]);
+  return (
+    <div style={{
+      position:'fixed', left:0, right:0, bottom:86, display:'grid', gap:8,
+      padding:'0 12px', pointerEvents:'none', zIndex:50
+    }}>
+      {list.map(i=>(
+        <div key={i.id} className="glass card" style={{pointerEvents:'auto', justifySelf:'center'}}>
+          {i.text}
+        </div>
+      ))}
+    </div>
+  );
+};
+
+export default ToastHost;
+TS
+
+############################################
+# 4) Обновляем ленту: баннеры, рейтинг, бонусы
+############################################
+cat > "$SRC/pages/FeedScreen.tsx" <<'TS'
+import React, { useEffect, useState } from 'react';
+import { feed, likeCatch, rateCatch, bonusAward } from '../api';
+import Icon from '../components/Icon';
+import config from '../config';
+import { Link } from 'react-router-dom';
+import RatingStars from '../components/RatingStars';
+import BannerSlot from '../components/BannerSlot';
+import { pushToast } from '../components/Toast';
+
+const FeedScreen: React.FC = () => {
+  const [items, setItems] = useState<any[]>([]);
+  const [err, setErr] = useState('');
+
+  useEffect(()=>{
+    feed({limit:20, offset:0})
+      .then((r)=> Array.isArray(r)? setItems(r) : setItems([]))
+      .catch((e)=> setErr(e.message||'Ошибка загрузки ленты'));
+  },[]);
+
+  async function onLike(id:any){
+    try{
+      await likeCatch(id);
+      pushToast('Лайк засчитан');
+      // Попытка начислить бонус (если бэк поддерживает)
+      bonusAward('like', {catch_id:id}).catch(()=>{});
+    }catch(e:any){ pushToast(e?.message||'Ошибка'); }
+  }
+  async function onRate(id:any, stars:number){
+    try{
+      await rateCatch(id, stars);
+      pushToast(`Оценка ${stars}/5 сохранена`);
+      bonusAward('like', {kind:'rate', catch_id:id, stars}).catch(()=>{});
+    }catch(e:any){ pushToast(e?.message||'Ошибка'); }
+  }
+
+  const spaced = [];
+  const every = config.banners.feedEvery;
+  for (let i=0;i<items.length;i++){
+    spaced.push({kind:'post', data:items[i]});
+    if ((i+1) % every === 0) spaced.push({kind:'banner', slot:`feed_${(i+1)/every}`});
+  }
+
+  return (
+    <div className="container">
+      <h2 className="h2">Лента</h2>
+      {err && <div className="card glass" style={{color:'#ffb4b4'}}>{err}</div>}
+
+      {(spaced.length? spaced : items.map(x=>({kind:'post', data:x}))).map((row:any, idx:number)=>{
+        if (row.kind==='banner') return <BannerSlot key={`b-${idx}`} slot={row.slot} />;
+        const it = row.data;
         return (
-          <a key={it.href} href={it.href} className={active?'active':''} aria-label={it.label}>
-            <div><Icon name={it.icon} /></div>
-            <div style={{fontSize:10, marginTop:2}}>{it.label}</div>
-          </a>
+          <div key={it.id ?? idx} className="glass card">
+            <div className="row" style={{justifyContent:'space-between'}}>
+              <div className="row">
+                <strong>{it.user_name || 'рыбак'}</strong>
+                <span className="muted">· {new Date(it.created_at||Date.now()).toLocaleString()}</span>
+              </div>
+              <div className="row">
+                <button className="btn" onClick={()=>onLike(it.id)}><Icon name={config.icons.like} /> {it.likes_count ?? 0}</button>
+                <Link className="btn" to={`/catch/${it.id}`}><Icon name={config.icons.comment} /> {it.comments_count ?? 0}</Link>
+                <button className="btn"><Icon name={config.icons.share} /> Поделиться</button>
+              </div>
+            </div>
+
+            {it.media_url && <img src={it.media_url} alt="" style={{width:'100%', borderRadius:12, marginTop:8}} />}
+            {it.caption && <div style={{marginTop:8}}>{it.caption}</div>}
+
+            <div className="row" style={{marginTop:8, justifyContent:'space-between', alignItems:'center'}}>
+              <div className="muted">Оцените улов</div>
+              <RatingStars value={Math.round(it.rating_avg || 0)} onChange={(v)=>onRate(it.id, v)} />
+            </div>
+          </div>
         );
       })}
-    </nav>
+    </div>
   );
-}
-TSX
-
-##################################
-# 6) api.ts — Единая обёртка, default export api + именованный points
-##################################
-cat > "${SRC}/api.ts" <<'TS'
-import { API_BASE } from './config';
-
-type Method = 'GET'|'POST'|'PUT'|'PATCH'|'DELETE';
-type Q = Record<string, string|number|boolean|undefined|null>;
-
-async function http<T>(path:string, {method='GET', body, auth=false, query}:{method?:Method; body?:any; auth?:boolean; query?:Q} = {}):Promise<T>{
-  const url = new URL(API_BASE + path);
-  if (query) Object.entries(query).forEach(([k,v])=>{
-    if (v!==undefined && v!==null && v!=='') url.searchParams.set(k,String(v));
-  });
-  const opts: RequestInit = {
-    method,
-    mode:'cors',
-    credentials: auth ? 'include' : 'omit',
-    headers: body instanceof FormData ? {'Accept':'application/json'} : {'Content-Type':'application/json','Accept':'application/json'},
-    body: body ? (body instanceof FormData ? body : JSON.stringify(body)) : undefined,
-  };
-  const res = await fetch(url.toString(), opts);
-  if (!res.ok) {
-    let msg = '';
-    try { msg = JSON.stringify(await res.clone().json()); } catch { msg = await res.text(); }
-    throw new Error(`${res.status} ${res.statusText} :: ${msg.slice(0,400)}`);
-  }
-  if (res.status===204) return {} as T;
-  const ct = res.headers.get('content-type')||'';
-  return ct.includes('application/json') ? res.json() : (await res.text() as unknown as T);
-}
-
-export const api = {
-  // FEED / MAP (всегда через /v1)
-  feed: (p:{limit?:number; offset?:number; sort?:'new'|'top'; fish?:string; near?:string}={}) => http('/v1/feed',{query:p}),
-  points: (p:{limit?:number; bbox?:string; filter?:string}={}) => http('/v1/map/points',{query:p}),
-
-  // DETAIL
-  catchById: (id:number|string)=> http(`/v1/catch/${id}`),
-
-  // WEATHER
-  weather: (p:{lat:number; lng:number; dt?:number})=> http('/v1/weather',{query:p}),
-
-  // MUTATIONS
-  addCatch: (payload:any)=> http('/v1/catches',{method:'POST', body:payload}),
-  addPlace: (payload:any)=> http('/v1/points',{method:'POST', body:payload}),
-
-  // PROFILE / ALERTS
-  me: ()=> http('/v1/profile/me', {auth:true}),
-  notifications: ()=> http('/v1/notifications', {auth:true}),
-
-  // SOCIAL
-  likeToggle: (id:number|string)=> http(`/v1/catch/${id}/like`, {method:'POST', auth:true}),
-  addComment: (id:number|string, payload:{text:string})=> http(`/v1/catch/${id}/comments`, {method:'POST', body:payload, auth:true}),
-  followToggle: (userId:number|string)=> http(`/v1/follow/${userId}`, {method:'POST', auth:true}),
 };
-
-export default api;
-
-// совместимость для старых импортов { points }
-export const points = (p:{limit?:number; bbox?:string; filter?:string}={}) => api.points(p);
-
-// локальные «избранные локации погоды»
-const WEATHER_KEY = 'weather_favs';
-export type WeatherFav = { id: string; name: string; lat: number; lng: number };
-export const getWeatherFavs = ():WeatherFav[] => {
-  try { const v = localStorage.getItem(WEATHER_KEY); const arr = v? JSON.parse(v): []; return Array.isArray(arr)?arr:[]; } catch { return []; }
-};
-export const saveWeatherFav = (fav:WeatherFav) => {
-  const list = getWeatherFavs();
-  const i = list.findIndex(x=>x.id===fav.id);
-  if (i>=0) list[i]=fav; else list.push(fav);
-  localStorage.setItem(WEATHER_KEY, JSON.stringify(list));
-  return list;
-};
+export default FeedScreen;
 TS
 
-##################################
-# 7) pages/MapScreen.tsx — карта + добавление точки + «в погоду»
-##################################
-cat > "${PAGES}/MapScreen.tsx" <<'TSX'
-import React, { useEffect, useRef, useState } from 'react';
-import api, { getWeatherFavs, saveWeatherFav } from '../api';
-import { TILES_URL, UI_DIMENSIONS } from '../config';
-import Icon from '../components/Icon';
-import 'leaflet/dist/leaflet.css';
-import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from 'react-leaflet';
-import L from 'leaflet';
+############################################
+# 5) Друзья, Настройки, Бонусы/Баланс, Лидерборд
+############################################
+cat > "$SRC/pages/FriendsPage.tsx" <<'TS'
+import React, { useEffect, useState } from 'react';
+import { friendsList, friendRequest, friendApprove, friendRemove } from '../api';
 
-type Point = {
-  id: number;
-  type?: string;
-  lat: number;
-  lng: number;
-  title?: string;
-  photos?: string[];
-  catch_id?: number;
-};
+const FriendsPage: React.FC = () => {
+  const [list, setList] = useState<any[]>([]);
+  const [email, setEmail] = useState('');
+  const [err, setErr] = useState('');
 
-const defaultCenter: [number, number] = [55.751244, 37.618423];
-const pinIcon = new L.Icon({
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-  iconSize: [25,41],
-  iconAnchor: [12,41],
-});
-
-function BoundsListener({ onBounds, onClick }: {onBounds:(b:L.LatLngBounds)=>void; onClick:(lat:number,lng:number)=>void}) {
-  useMapEvents({
-    moveend: (e)=> onBounds(e.target.getBounds()),
-    zoomend: (e)=> onBounds(e.target.getBounds()),
-    load: (e)=> onBounds(e.target.getBounds()),
-    click: (e)=> onClick(e.latlng.lat, e.latlng.lng),
-  });
-  return null;
-}
-
-export default function MapScreen() {
-  const [data,setData] = useState<Point[]>([]);
-  const [error,setError] = useState('');
-  const [draft,setDraft] = useState<{lat:number;lng:number}|null>(null);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(()=>{
-    const h = window.innerHeight - UI_DIMENSIONS.header - UI_DIMENSIONS.bottomNav;
-    if (ref.current) ref.current.style.height = `${Math.max(h, 320)}px`;
-  },[]);
-
-  const load = async(b?:L.LatLngBounds)=>{
+  async function reload(){
     try{
-      setError('');
-      const bbox = b ? `${b.getWest().toFixed(2)},${b.getSouth().toFixed(2)},${b.getEast().toFixed(2)},${b.getNorth().toFixed(2)}` : undefined;
-      const raw:any = await api.points({limit:500, bbox});
-      const list = Array.isArray(raw?.items) ? raw.items
-                 : Array.isArray(raw?.data) ? raw.data
-                 : Array.isArray(raw) ? raw : [];
-      const normalized: Point[] = list.map((p:any)=>({
-        id: Number(p.id ?? p.point_id ?? Math.random()*1e9),
-        type: p.type ?? p.category ?? 'spot',
-        lat: Number(p.lat ?? p.latitude),
-        lng: Number(p.lng ?? p.longitude),
-        title: p.title ?? p.name ?? '',
-        photos: Array.isArray(p.photos) ? p.photos : (p.photo_url ? [p.photo_url] : []),
-        catch_id: p.catch_id ? Number(p.catch_id) : undefined,
-      })).filter(p=>!Number.isNaN(p.lat)&&!Number.isNaN(p.lng));
-      setData(normalized);
-    }catch(e:any){
-      setError(e?.message || 'Ошибка загрузки точек');
-      setData([]);
-    }
-  };
+      const r = await friendsList();
+      setList(Array.isArray(r)? r: []);
+      setErr('');
+    }catch(e:any){ setErr(e?.message||'Не удалось загрузить друзей'); }
+  }
+  useEffect(()=>{ reload(); },[]);
 
-  const openEntity = (p:Point)=> { window.location.href = p.catch_id ? `/catch/${p.catch_id}` : `/place/${p.id}`; };
-
-  const addToWeather = (lat:number,lng:number,name='Точка')=>{
-    const id = `point-${lat.toFixed(4)}-${lng.toFixed(4)}`;
-    saveWeatherFav({ id, name, lat, lng });
-    alert('Локация сохранена на странице погоды');
-  };
-
-  const savePlace = async ()=>{
-    if(!draft) return;
-    try{
-      await api.addPlace({ lat: draft.lat, lng: draft.lng, title:'Моё место' });
-      setDraft(null);
-      await load();
-      addToWeather(draft.lat,draft.lng,'Моё место');
-    }catch(e:any){
-      alert('Не удалось сохранить место: '+(e?.message||''));
-    }
-  };
+  async function sendReq(e:React.FormEvent){
+    e.preventDefault();
+    try{ await friendRequest(email); setEmail(''); reload(); }
+    catch(e:any){ alert(e?.message||'Ошибка'); }
+  }
 
   return (
-    <div className="p-3">
-      <div className="glass card mb-3" style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12}}>
-        <div><strong>Карта</strong></div>
-        <div style={{display:'flex',gap:8}}>
-          <a className="btn" href="/add-place"><Icon name="add_location" />&nbsp;Добавить точку</a>
-          <a className="btn" href="/add-catch"><Icon name="add_photo_alternate" />&nbsp;Добавить улов</a>
-        </div>
-      </div>
+    <div className="container">
+      <h2 className="h2">Друзья</h2>
+      <form className="glass card row" onSubmit={sendReq} style={{gap:8}}>
+        <input className="input" placeholder="Email друга" value={email} onChange={e=>setEmail(e.target.value)} required />
+        <button className="btn primary">Пригласить</button>
+      </form>
 
-      <div ref={ref} className="card" style={{overflow:'hidden'}}>
-        <MapContainer center={defaultCenter} zoom={10} style={{width:'100%',height:'100%'}}>
-          <TileLayer url={TILES_URL} attribution="&copy; OpenStreetMap contributors"/>
-          <BoundsListener
-            onBounds={(b)=>load(b)}
-            onClick={(lat,lng)=> setDraft({lat,lng}) }
-          />
+      {err && <div className="card glass" style={{color:'#ffb4b4'}}>{err}</div>}
 
-          {data.map(p=>(
-            <Marker key={`${p.id}-${p.lat}-${p.lng}`} position={[p.lat,p.lng]} icon={pinIcon}>
-              <Popup>
-                <div style={{maxWidth:240}}>
-                  <div className="font-medium mb-2">{p.title || 'Точка'}</div>
-                  {p.photos && p.photos.length ? (
-                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-                      {p.photos.slice(0,4).map((src,idx)=>(
-                        <img key={idx} src={src} alt="" style={{width:'100%',height:'80px',objectFit:'cover',borderRadius:8,cursor:'pointer'}} onClick={()=>openEntity(p)} />
-                      ))}
-                    </div>
-                  ) : <div className="opacity-70 text-sm mb-2">Фото не прикреплены</div>}
-                  <div className="mt-2" style={{display:'flex',gap:8}}>
-                    <button className="btn" onClick={()=>openEntity(p)}><Icon name="open_in_new" />&nbsp;Открыть</button>
-                    <button className="btn" onClick={()=>addToWeather(p.lat,p.lng,p.title||'Точка')}><Icon name="cloud_download" />&nbsp;В погоду</button>
-                  </div>
-                </div>
-              </Popup>
-            </Marker>
-          ))}
-
-          {draft && (
-            <Marker position={[draft.lat,draft.lng]} icon={pinIcon}>
-              <Popup>
-                <div style={{maxWidth:220}}>
-                  Новая точка<br/>
-                  {draft.lat.toFixed(5)}, {draft.lng.toFixed(5)}
-                  <div className="mt-2" style={{display:'flex',gap:8}}>
-                    <button className="btn" onClick={savePlace}><Icon name="save" />&nbsp;Сохранить</button>
-                    <button className="btn" onClick={()=>setDraft(null)}><Icon name="close" />&nbsp;Отмена</button>
-                  </div>
-                </div>
-              </Popup>
-            </Marker>
-          )}
-        </MapContainer>
-      </div>
-
-      {!!error && <div className="mt-3" style={{color:'#ff9b9b'}}>Ошибка карты: {error}</div>}
-
-      <div className="glass card mt-3" style={{display:'flex',justifyContent:'space-between'}}>
-        <div>Избранные локации погоды: {getWeatherFavs().length || 0}</div>
-        <a className="btn" href="/weather"><Icon name="weather_mix" />&nbsp;Открыть погоду</a>
-      </div>
-    </div>
-  );
-}
-TSX
-
-##################################
-# 8) pages/FeedScreen.tsx — лента на api.feed
-##################################
-cat > "${PAGES}/FeedScreen.tsx" <<'TSX'
-import React, { useEffect, useState } from 'react';
-import api from '../api';
-import Icon from '../components/Icon';
-
-type FeedItem = {
-  id:number;
-  user_name?:string;
-  media_url?:string;
-  caption?:string;
-  likes_count?:number;
-  comments_count?:number;
-  created_at?:string;
-};
-
-export default function FeedScreen(){
-  const [data,setData] = useState<FeedItem[]>([]);
-  const [error,setError] = useState('');
-
-  useEffect(()=>{
-    (async()=>{
-      try{
-        setError('');
-        const res:any = await api.feed({limit:10, offset:0});
-        const list = Array.isArray(res?.items) ? res.items
-                   : Array.isArray(res?.data) ? res.data
-                   : Array.isArray(res) ? res : [];
-        setData(list);
-      }catch(e:any){
-        setError(e?.message||'Ошибка ленты');
-      }
-    })();
-  },[]);
-
-  return (
-    <div className="p-3" style={{paddingBottom:80}}>
-      <div className="glass card mb-3" style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-        <strong>Лента</strong>
-        <a className="btn" href="/add-catch"><Icon name="add_photo_alternate" />&nbsp;Добавить улов</a>
-      </div>
-      {!!error && <div className="card" style={{color:'#ff9b9b'}}>{error}</div>}
-      {data.map((it)=>(
-        <div key={it.id} className="card glass mb-3">
-          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
-            <div style={{width:32,height:32,borderRadius:'50%',background:'rgba(255,255,255,0.1)'}} />
-            <div style={{fontWeight:600}}>{it.user_name||'Рыбак'}</div>
-            <div style={{marginLeft:'auto', opacity:.7, fontSize:12}}>{new Date(it.created_at||Date.now()).toLocaleString()}</div>
-          </div>
-          {it.media_url && <img src={it.media_url} alt="" style={{width:'100%',borderRadius:12,objectFit:'cover',maxHeight:420}} />}
-          {it.caption && <div style={{marginTop:8}}>{it.caption}</div>}
-          <div style={{display:'flex',gap:16,marginTop:8}}>
-            <button className="btn"><Icon name="favorite" /> {it.likes_count ?? 0}</button>
-            <button className="btn"><Icon name="mode_comment" /> {it.comments_count ?? 0}</button>
-            <button className="btn"><Icon name="share" /> Поделиться</button>
-          </div>
-          <div style={{marginTop:8}}>
-            <a href={`/catch/${it.id}`}><Icon name="open_in_new" /> Открыть</a>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-TSX
-
-##################################
-# 9) pages/NotificationsPage.tsx — использует /v1/notifications
-##################################
-cat > "${PAGES}/NotificationsPage.tsx" <<'TSX'
-import React, { useEffect, useState } from 'react';
-import api from '../api';
-
-type N = { id:number|string; type:string; text:string; created_at?:string };
-
-export default function NotificationsPage(){
-  const [list,setList] = useState<N[]>([]);
-  const [error,setError] = useState('');
-
-  useEffect(()=>{
-    (async()=>{
-      try{
-        setError('');
-        const res:any = await api.notifications();
-        const arr = Array.isArray(res?.items)?res.items : Array.isArray(res?.data)?res.data : Array.isArray(res)?res : [];
-        setList(arr);
-      }catch(e:any){
-        setError(e?.message||'Не удалось загрузить уведомления');
-      }
-    })();
-  },[]);
-
-  return (
-    <div className="p-3" style={{paddingBottom:80}}>
-      <div className="glass card mb-3"><strong>Уведомления</strong></div>
-      {!!error && <div className="card" style={{color:'#ff9b9b'}}>{error}</div>}
-      {list.length===0 && !error && <div className="card">Уведомлений пока нет</div>}
-      {list.map(n=>(
-        <div key={String(n.id)} className="card glass mb-2">
-          <div style={{fontWeight:600, marginBottom:4}}>{n.type}</div>
-          <div>{n.text}</div>
-          <div style={{opacity:.6, fontSize:12, marginTop:6}}>{n.created_at? new Date(n.created_at).toLocaleString() : ''}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
-TSX
-
-##################################
-# 10) pages/ProfilePage.tsx — /v1/profile/me
-##################################
-cat > "${PAGES}/ProfilePage.tsx" <<'TSX'
-import React, { useEffect, useState } from 'react';
-import api from '../api';
-
-type Me = { id:number; name:string; points?:number; avatar_url?:string };
-
-export default function ProfilePage(){
-  const [me,setMe] = useState<Me|null>(null);
-  const [error,setError] = useState('');
-
-  useEffect(()=>{
-    (async()=>{
-      try{
-        setError('');
-        const res:any = await api.me();
-        setMe(res);
-      }catch(e:any){
-        setError(e?.message||'Не удалось загрузить профиль');
-      }
-    })();
-  },[]);
-
-  return (
-    <div className="p-3" style={{paddingBottom:80}}>
-      <div className="glass card mb-3"><strong>Профиль</strong></div>
-      {!!error && <div className="card" style={{color:'#ff9b9b'}}>{error}</div>}
-      {!me && !error && <div className="card">Не авторизован</div>}
-      {me && (
-        <div className="glass card">
-          <div style={{display:'flex',gap:12,alignItems:'center'}}>
-            <div style={{width:64,height:64,borderRadius:'50%',background:'rgba(255,255,255,0.1)',overflow:'hidden'}}>
-              {me.avatar_url && <img src={me.avatar_url} alt="" style={{width:'100%',height:'100%',objectFit:'cover'}}/>}
-            </div>
+      <div className="grid" style={{marginTop:12}}>
+        {list.map((f:any)=>(
+          <div key={f.id} className="glass card row" style={{justifyContent:'space-between'}}>
             <div>
-              <div style={{fontWeight:700,fontSize:18}}>{me.name}</div>
-              <div style={{opacity:.7}}>Бонусы: {me.points ?? 0}</div>
+              <div style={{fontWeight:600}}>{f.name || f.email}</div>
+              <div className="muted">{f.status || 'friend'}</div>
+            </div>
+            <div className="row">
+              {f.request_id && f.status==='pending' && (
+                <button className="btn" onClick={()=>friendApprove(f.request_id).then(reload)}>Принять</button>
+              )}
+              <button className="btn" onClick={()=>friendRemove(f.user_id || f.id).then(reload)}>Удалить</button>
             </div>
           </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+export default FriendsPage;
+TS
+
+cat > "$SRC/pages/SettingsPage.tsx" <<'TS'
+import React, { useEffect, useState } from 'react';
+import { settingsGet, settingsUpdate } from '../api';
+
+const SettingsPage: React.FC = () => {
+  const [data, setData] = useState<any>({});
+  const [msg, setMsg] = useState('');
+
+  useEffect(()=>{
+    settingsGet().then(setData).catch(()=>setData({}));
+  },[]);
+
+  function set<K extends string>(k:K, v:any){ setData((s:any)=> ({...s, [k]:v})); }
+
+  async function save(e:React.FormEvent){
+    e.preventDefault(); setMsg('');
+    try{
+      await settingsUpdate(data);
+      setMsg('Сохранено');
+    }catch(e:any){ setMsg(e?.message||'Ошибка'); }
+  }
+
+  return (
+    <div className="container">
+      <h2 className="h2">Настройки профиля</h2>
+      <form className="glass card grid" onSubmit={save}>
+        <label>Никнейм</label>
+        <input className="input" value={data.nickname||''} onChange={e=>set('nickname', e.target.value)} />
+        <label>Приватность по умолчанию</label>
+        <select className="select" value={data.default_privacy||'all'} onChange={e=>set('default_privacy', e.target.value)}>
+          <option value="all">Все</option>
+          <option value="friends">Друзья</option>
+          <option value="private">Лично</option>
+        </select>
+        <button className="btn primary" type="submit">Сохранить</button>
+        {msg && <div className="muted">{msg}</div>}
+      </form>
+    </div>
+  );
+};
+export default SettingsPage;
+TS
+
+cat > "$SRC/pages/BonusesPage.tsx" <<'TS'
+import React, { useEffect, useState } from 'react';
+import { bonusBalance, bonusHistory } from '../api';
+import Icon from '../components/Icon';
+import config from '../config';
+
+const BonusesPage: React.FC = () => {
+  const [balance, setBalance] = useState<number>(0);
+  const [list, setList] = useState<any[]>([]);
+  const [err, setErr] = useState('');
+
+  useEffect(()=>{
+    Promise.all([bonusBalance().catch(e=>{setErr(e.message||''); return {balance:0};}), bonusHistory().catch(()=>[])])
+      .then(([b, h]: any)=> {
+        setBalance(b?.balance ?? 0);
+        setList(Array.isArray(h)? h: []);
+      });
+  },[]);
+
+  return (
+    <div className="container">
+      <h2 className="h2">Бонусы</h2>
+      {err && <div className="card glass" style={{color:'#ffb4b4'}}>{err}</div>}
+
+      <div className="glass card row" style={{justifyContent:'space-between'}}>
+        <div className="row"><Icon name={config.icons.gift} /> Текущий баланс</div>
+        <div style={{fontWeight:700, fontSize:'1.25rem'}}>{balance}</div>
+      </div>
+
+      <h3 style={{marginTop:12}}>История</h3>
+      <div className="grid">
+        {list.map((i,idx)=>(
+          <div key={idx} className="glass card row" style={{justifyContent:'space-between'}}>
+            <div>
+              <div style={{fontWeight:600}}>{i.title || i.action}</div>
+              <div className="muted">{i.created_at ? new Date(i.created_at).toLocaleString(): ''}</div>
+            </div>
+            <div style={{fontWeight:700}}>{i.delta > 0 ? `+${i.delta}`: i.delta}</div>
+          </div>
+        ))}
+        {list.length===0 && <div className="glass card">Записей нет</div>}
+      </div>
+    </div>
+  );
+};
+export default BonusesPage;
+TS
+
+cat > "$SRC/pages/LeaderboardPage.tsx" <<'TS'
+import React, { useEffect, useState } from 'react';
+import { leaderboard } from '../api';
+import Icon from '../components/Icon';
+import config from '../config';
+
+const LeaderboardPage: React.FC = () => {
+  const [list, setList] = useState<any[]>([]);
+  const [err, setErr] = useState('');
+
+  useEffect(()=>{
+    leaderboard(50).then(r=> setList(Array.isArray(r)? r: [])).catch(e=> setErr(e.message||''));
+  },[]);
+
+  return (
+    <div className="container">
+      <h2 className="h2">Лидерборд</h2>
+      {err && <div className="glass card" style={{color:'#ffb4b4'}}>{err}</div>}
+
+      <div className="grid">
+        {list.map((u, idx)=>(
+          <div key={u.user_id ?? idx} className="glass card row" style={{justifyContent:'space-between'}}>
+            <div className="row">
+              <Icon name={config.icons.leaderboard} />
+              <strong style={{marginLeft:6}}>{u.name || `Участник #${u.user_id||idx+1}`}</strong>
+            </div>
+            <div className="muted">Очки: <b>{u.score ?? 0}</b></div>
+          </div>
+        ))}
+        {list.length===0 && <div className="glass card">Нет данных</div>}
+      </div>
+    </div>
+  );
+};
+
+export default LeaderboardPage;
+TS
+
+############################################
+# 6) Обновляем MapScreen (кнопка тостов подключена уже)
+############################################
+cat > "$SRC/pages/MapScreen.tsx" <<'TS'
+import React, { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { points, saveWeatherFav } from '../api';
+import { loadLeaflet } from '../utils/leafletLoader';
+import PointPinCard from '../components/PointPinCard';
+import Icon from '../components/Icon';
+import config from '../config';
+import { pushToast } from '../components/Toast';
+
+const MapScreen: React.FC = () => {
+  const nav = useNavigate();
+  const mapRef = useRef<any>(null);
+  const layerRef = useRef<any>(null);
+  const [list, setList] = useState<any[]>([]);
+  const [selected, setSelected] = useState<any|null>(null);
+  const mapEl = useRef<HTMLDivElement>(null);
+
+  useEffect(()=>{
+    async function run(){
+      try{
+        const arr = await points(undefined, 500);
+        setList(Array.isArray(arr)? arr : []);
+      }catch(e){ console.error('points load error', e); }
+    }
+    run();
+  },[]);
+
+  useEffect(()=>{
+    let map:any, L:any, markers:any;
+    async function init(){
+      if (!mapEl.current) return;
+      L = await loadLeaflet();
+
+      map = L.map(mapEl.current).setView([55.75, 37.62], 10);
+      mapRef.current = map;
+
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+        attribution:'© OpenStreetMap',
+      }).addTo(map);
+
+      markers = L.layerGroup().addTo(map);
+      layerRef.current = markers;
+
+      map.on('click', (ev:any)=>{
+        const { lat, lng } = ev.latlng;
+        saveWeatherFav({lat, lng, title:`Выбранная точка`});
+        pushToast('Точка добавлена в «Погоду»');
+      });
+    }
+    init();
+    return ()=>{ if (mapRef.current) mapRef.current.remove(); };
+  },[]);
+
+  useEffect(()=>{
+    (async ()=>{
+      const L = await loadLeaflet();
+      const g = layerRef.current;
+      if (!g) return;
+      g.clearLayers();
+
+      (Array.isArray(list) ? list : []).forEach((p:any)=>{
+        const m = L.marker([p.lat, p.lng]).addTo(g);
+        m.on('click', ()=> setSelected(p));
+      });
+    })();
+  },[list]);
+
+  return (
+    <div className="container">
+      <div className="row" style={{justifyContent:'space-between', marginBottom:8}}>
+        <h2 className="h2">Карта</h2>
+        <div className="row" style={{gap:6}}>
+          <button className="btn" onClick={()=>nav('/add/place')} title="Добавить место">
+            <Icon name={config.icons.add} /> Место
+          </button>
+          <button className="btn" onClick={()=>nav('/add/catch')} title="Добавить улов">
+            <Icon name={config.icons.add} /> Улов
+          </button>
+        </div>
+      </div>
+
+      <div ref={mapEl} className="leaflet-container glass" />
+
+      {selected && (
+        <div style={{marginTop:12}}>
+          <PointPinCard p={{
+            id: selected.id,
+            lat: selected.lat,
+            lng: selected.lng,
+            title: selected.title || selected.name,
+            photos: selected.photos,
+            kind: selected.type || 'place'
+          }}/>
         </div>
       )}
     </div>
   );
-}
-TSX
+};
+export default MapScreen;
+TS
 
-##################################
-# 11) App.tsx — маршруты без #, стек страниц
-##################################
-cat > "${SRC}/App.tsx" <<'TSX'
-import React from 'react';
-import Header from './components/Header';
-import BottomNav from './components/BottomNav';
-import FeedScreen from './pages/FeedScreen';
-import MapScreen from './pages/MapScreen';
-import NotificationsPage from './pages/NotificationsPage';
-import ProfilePage from './pages/ProfilePage';
-import './styles/app.css';
+############################################
+# 7) Обновляем ProfilePage: ссылки на новые разделы
+############################################
+cat > "$SRC/pages/ProfilePage.tsx" <<'TS'
+import React, { useEffect, useState } from 'react';
+import config from '../config';
+import { profileMe, isAuthed, logout } from '../api';
+import { Link } from 'react-router-dom';
+import Icon from '../components/Icon';
 
-function RouterSwitch(){
-  const path = typeof window !== 'undefined' ? window.location.pathname : '/feed';
+const ProfilePage: React.FC = () => {
+  const [me, setMe] = useState<any>(null);
+  const [err, setErr] = useState<string>('');
 
-  if (path === '/' || path === '/feed') return <FeedScreen />;
-  if (path.startsWith('/map')) return <MapScreen />;
-  if (path.startsWith('/alerts')) return <NotificationsPage />;
-  if (path.startsWith('/profile')) return <ProfilePage />;
+  useEffect(() => {
+    if (!isAuthed()) {
+      setErr('Требуется вход в систему.');
+      return;
+    }
+    profileMe()
+      .then(setMe)
+      .catch((e) => setErr(e.message || 'Не удалось загрузить профиль'));
+  }, []);
 
-  // простые-заглушки — чтобы сборка не падала
-  if (path.startsWith('/add-catch')) return <div className="p-3"><div className="card">Форма добавления улова (в разработке)</div></div>;
-  if (path.startsWith('/add-place')) return <div className="p-3"><div className="card">Форма добавления места (в разработке)</div></div>;
-  if (path.startsWith('/weather')) return <div className="p-3"><div className="card">Погода (в разработке)</div></div>;
-  if (path.startsWith('/catch/')) return <div className="p-3"><div className="card">Карточка улова (в разработке)</div></div>;
-  if (path.startsWith('/place/')) return <div className="p-3"><div className="card">Карточка места (в разработке)</div></div>;
+  const avatar = me?.photo_url || config?.images?.defaultAvatar || '/assets/default-avatar.png';
 
-  return <div className="p-3"><div className="card">Страница не найдена</div></div>;
-}
-
-export default function App(){
   return (
-    <div>
-      <Header />
-      <RouterSwitch />
-      <BottomNav />
+    <div className="container">
+      <div className="glass card" style={{display:'flex', gap:12, alignItems:'center'}}>
+        <img src={avatar} alt="avatar" style={{width:64, height:64, borderRadius:'50%', objectFit:'cover'}} />
+        <div style={{flex:1}}>
+          <div style={{fontWeight:600}}>{me?.name || '—'}</div>
+          <div className="muted">{me?.email || ''}</div>
+        </div>
+        {isAuthed() && (
+          <button className="btn" onClick={()=>{ logout(); location.href='/login'; }}>Выйти</button>
+        )}
+      </div>
+      {err && <div className="card glass" style={{color:'#ffb4b4', marginTop:10}}>{err}</div>}
+
+      <div className="grid" style={{marginTop:12}}>
+        <Link to="/friends" className="glass card row" style={{justifyContent:'space-between'}}>
+          <div className="row"><Icon name={config.icons.friends} /> Друзья</div>
+          <Icon name="chevron_right" />
+        </Link>
+        <Link to="/bonuses" className="glass card row" style={{justifyContent:'space-between'}}>
+          <div className="row"><Icon name={config.icons.gift} /> Бонусы и история</div>
+          <Icon name="chevron_right" />
+        </Link>
+        <Link to="/leaderboard" className="glass card row" style={{justifyContent:'space-between'}}>
+          <div className="row"><Icon name={config.icons.leaderboard} /> Лидерборд</div>
+          <Icon name="chevron_right" />
+        </Link>
+        <Link to="/settings" className="glass card row" style={{justifyContent:'space-between'}}>
+          <div className="row"><Icon name={config.icons.settings} /> Настройки профиля</div>
+          <Icon name="chevron_right" />
+        </Link>
+      </div>
     </div>
   );
-}
-TSX
+};
 
-##################################
-# 12) main.tsx — монтирование
-##################################
-cat > "${SRC}/main.tsx" <<'TSX'
+export default ProfilePage;
+TS
+
+############################################
+# 8) WeatherPage — без изменений логики, лишь сохраняем совместимость (оставим как есть)
+############################################
+cat > "$SRC/pages/WeatherPage.tsx" <<'TS'
 import React from 'react';
-import { createRoot } from 'react-dom/client';
-import App from './App';
+import { getWeatherFavs } from '../api';
 
-const rootEl = document.getElementById('root');
-if (rootEl) {
-  createRoot(rootEl).render(<App />);
-}
-TSX
+const WeatherPage: React.FC = () => {
+  const favs = getWeatherFavs();
+  const list = Array.isArray(favs) ? favs : [];
 
-echo "✅ Файлы обновлены. Теперь:"
-echo "1) cd frontend"
-echo "2) npm i"
-echo "3) npm run build"
-echo
-echo "Если бэкенд отдаёт API под /api/v1/* — всё ок. Иначе поправь API_BASE в src/config.ts."
+  return (
+    <div className="container">
+      <h2 className="h2">Погода</h2>
+      {list.length === 0 ? (
+        <div className="muted glass card">Пока ни одной избранной точки. Нажмите по карте, чтобы добавить.</div>
+      ) : (
+        <ul className="grid" style={{listStyle:'none', padding:0}}>
+          {list.map((p, idx) => (
+            <li key={idx} className="card glass">
+              <div style={{fontWeight:600}}>{p.title || `Точка (${p.lat.toFixed(4)}, ${p.lng.toFixed(4)})`}</div>
+              <div className="muted">температура: — / ветер: —</div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+};
+
+export default WeatherPage;
+TS
+
+############################################
+# 9) AppRoot.tsx — добавляем новые маршруты + ToastHost
+############################################
+cat > "$SRC/AppRoot.tsx" <<'TS'
+import React from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+
+import Header from './components/Header';
+import BottomNav from './components/BottomNav';
+import ToastHost from './components/Toast';
+
+import FeedScreen from './pages/FeedScreen';
+import MapScreen from './pages/MapScreen';
+import AddCatchPage from './pages/AddCatchPage';
+import AddPlacePage from './pages/AddPlacePage';
+import NotificationsPage from './pages/NotificationsPage';
+import ProfilePage from './pages/ProfilePage';
+import WeatherPage from './pages/WeatherPage';
+import CatchDetailPage from './pages/CatchDetailPage';
+import PlaceDetailPage from './pages/PlaceDetailPage';
+
+import LoginPage from './pages/LoginPage';
+import RegisterPage from './pages/RegisterPage';
+import FriendsPage from './pages/FriendsPage';
+import SettingsPage from './pages/SettingsPage';
+import BonusesPage from './pages/BonusesPage';
+import LeaderboardPage from './pages/LeaderboardPage';
+import { isAuthed } from './api';
+
+const ProtectedRoute: React.FC<{ children: React.ReactElement }> = ({ children }) => {
+  if (!isAuthed()) return <Navigate to="/login" replace />;
+  return children;
+};
+
+const AppRoot: React.FC = () => {
+  return (
+    <BrowserRouter>
+      <div className="app-shell">
+        <Header />
+        <main className="app-main">
+          <Routes>
+            <Route path="/" element={<Navigate to="/feed" replace />} />
+            <Route path="/feed" element={<FeedScreen />} />
+            <Route path="/map" element={<MapScreen />} />
+            <Route path="/catch/:id" element={<CatchDetailPage />} />
+            <Route path="/place/:id" element={<PlaceDetailPage />} />
+            <Route path="/weather" element={<WeatherPage />} />
+            <Route path="/alerts" element={<NotificationsPage />} />
+
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/register" element={<RegisterPage />} />
+
+            <Route path="/add/catch" element={<ProtectedRoute><AddCatchPage /></ProtectedRoute>} />
+            <Route path="/add/place" element={<ProtectedRoute><AddPlacePage /></ProtectedRoute>} />
+            <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+
+            <Route path="/friends" element={<ProtectedRoute><FriendsPage /></ProtectedRoute>} />
+            <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
+            <Route path="/bonuses" element={<ProtectedRoute><BonusesPage /></ProtectedRoute>} />
+            <Route path="/leaderboard" element={<LeaderboardPage />} />
+
+            <Route path="*" element={<Navigate to="/feed" replace />} />
+          </Routes>
+        </main>
+        <BottomNav />
+      </div>
+      <ToastHost />
+      <style>{`
+        .app-shell { min-height: 100svh; display: grid; grid-template-rows: auto 1fr auto; }
+        .app-main { min-height: 0; }
+      `}</style>
+    </BrowserRouter>
+  );
+};
+
+export default AppRoot;
+TS
+
+############################################
+# 10) Обновляем Header/BottomNav (совместимость) — уже ок, но перезапишем на всякий
+############################################
+cat > "$SRC/components/Header.tsx" <<'TS'
+import React from 'react';
+import { Link } from 'react-router-dom';
+import config from '../config';
+import Icon from './Icon';
+
+const Header: React.FC = () => {
+  const logo = config?.images?.logoUrl || '/src/assets/logo.svg';
+  return (
+    <header className="header glass">
+      <div className="left">
+        <Link to="/feed" className="row" aria-label="На главную">
+          <img src={logo} alt="Logo" style={{height:28}} />
+        </Link>
+      </div>
+      <div className="right">
+        <Link to="/weather" className="btn" title="Погода">
+          <Icon name={config.icons.weather} /> <span className="hide-sm">Погода</span>
+        </Link>
+        <Link to="/add/catch" className="btn primary" title="Добавить улов">
+          <Icon name={config.icons.add} /> <span className="hide-sm">Улов</span>
+        </Link>
+      </div>
+    </header>
+  );
+};
+
+export default Header;
+TS
+
+cat > "$SRC/components/BottomNav.tsx" <<'TS'
+import React from 'react';
+import { Link, useLocation } from 'react-router-dom';
+import config from '../config';
+import Icon from './Icon';
+
+const BottomNav: React.FC = () => {
+  const { pathname } = useLocation();
+  const is = (p: string) => pathname.startsWith(p);
+  const Item: React.FC<{to:string; icon:string; label:string}> = ({to, icon, label}) => (
+    <Link to={to} className={`bottom-link glass ${is(to)?'active':''}`}>
+      <Icon name={icon} />
+      <small>{label}</small>
+    </Link>
+  );
+  return (
+    <nav className="bottom-nav glass">
+      <Item to="/feed" icon={config.icons.home} label="Лента" />
+      <Item to="/map" icon={config.icons.map} label="Карта" />
+      <Item to="/add/place" icon={config.icons.add} label="Место" />
+      <Item to="/alerts" icon={config.icons.alerts} label="Оповещения" />
+      <Item to="/profile" icon={config.icons.profile} label="Профиль" />
+    </nav>
+  );
+};
+
+export default BottomNav;
+TS
+
+echo "✅ Sprint 2 front updates applied."
+echo "Теперь: npm i && npm run build"
