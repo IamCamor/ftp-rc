@@ -1,32 +1,52 @@
 import config from './config';
 
-type HttpOptions = {
+/** ====== helpers ====== */
+type HttpOpts = {
   method?: 'GET'|'POST'|'PUT'|'PATCH'|'DELETE';
   body?: any;
-  auth?: boolean;
   headers?: Record<string,string>;
+  auth?: boolean;           // добавлять Bearer токен
+  credentials?: RequestCredentials; // по умолчанию 'omit'
 };
 
-function getToken(): string | null { try { return localStorage.getItem('token'); } catch { return null; } }
-export function isAuthed(){ return !!getToken(); }
-export function logout(){ try { localStorage.removeItem('token'); } catch {} }
+function getToken(): string | null {
+  try { return localStorage.getItem('token'); } catch { return null; }
+}
 
-async function http<T=any>(url: string, opts: HttpOptions = {}): Promise<T> {
-  const { method='GET', body, auth=true, headers={} } = opts;
+function setToken(token?: string) {
+  try {
+    if (token) localStorage.setItem('token', token);
+  } catch {}
+}
+
+export function logout() {
+  try { localStorage.removeItem('token'); } catch {}
+}
+
+async function http<T=any>(url: string, opts: HttpOpts = {}): Promise<T> {
+  const {
+    method = 'GET',
+    body,
+    headers = {},
+    auth = true,
+    credentials = 'omit'
+  } = opts;
+
   const token = getToken();
+
   const res = await fetch(url, {
     method,
-    mode: 'cors',
-    credentials: 'omit',
+    credentials,
     headers: {
       'Accept': 'application/json',
-      ...(body ? {'Content-Type': 'application/json'} : {}),
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
       ...(auth && token ? { 'Authorization': `Bearer ${token}` } : {}),
       ...headers,
     },
     body: body ? JSON.stringify(body) : undefined,
   });
 
+  // читаем как текст, затем пытаемся JSON
   const text = await res.text().catch(()=> '');
   let data: any = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = text; }
@@ -41,94 +61,112 @@ async function http<T=any>(url: string, opts: HttpOptions = {}): Promise<T> {
   return (data ?? undefined) as T;
 }
 
-function unwrap<T=any>(x: any, fallback: T): T {
-  if (x == null) return fallback;
-  if (Array.isArray(x)) return x as T;
-  if (typeof x === 'object' && Array.isArray((x as any).data)) return (x as any).data as T;
-  return x as T;
-}
+/** ====== bases ====== */
+const base = config.apiBase;     // например: https://api.fishtrackpro.ru/api/v1
+const authBase = config.authBase; // например: https://api.fishtrackpro.ru
 
-const base = config.apiBase;
-const authBase = config.authBase;
-
-/** DATA */
-export async function feed(params: {limit?: number; offset?: number} = {}) {
-  const q = new URLSearchParams();
-  if (params.limit) q.set('limit', String(params.limit));
-  if (params.offset) q.set('offset', String(params.offset));
-  const r = await http<any>(`${base}/feed${q.toString()?`?${q.toString()}`:''}`);
-  return unwrap<any[]>(r, []);
-}
-export async function points(bbox?: string, limit:number=500) {
-  const q = new URLSearchParams();
-  q.set('limit', String(limit));
-  if (bbox) q.set('bbox', bbox);
-  const r = await http<any>(`${base}/map/points?${q.toString()}`);
-  return unwrap<any[]>(r, []);
-}
-export async function catchById(id: string|number){ return await http<any>(`${base}/catch/${id}`); }
-export async function placeById(id: string|number){ return await http<any>(`${base}/place/${id}`); }
-export async function addCatchComment(id:number|string, text:string){ return await http(`${base}/catch/${id}/comments`, {method:'POST', body:{text}}); }
-export async function likeCatch(id:number|string){ return await http(`${base}/catch/${id}/like`, {method:'POST'}); }
-export async function notifications(){ const r = await http<any>(`${base}/notifications`); return unwrap<any[]>(r, []); }
-export async function profileMe(){ return await http<any>(`${base}/profile/me`); }
-export async function addCatch(payload: any){ return await http(`${base}/catch`, {method:'POST', body: payload}); }
-export async function addPlace(payload: any){ return await http(`${base}/place`, {method:'POST', body: payload}); }
-
-/** WEATHER FAVS — локальное хранилище */
-export function getWeatherFavs(): Array<{lat:number; lng:number; title?:string; id?:string|number}> {
-  try { const raw = localStorage.getItem('weather_favs'); const parsed = raw ? JSON.parse(raw) : []; return Array.isArray(parsed) ? parsed : []; }
-  catch { return []; }
-}
-export function saveWeatherFav(p: {lat:number; lng:number; title?:string}) {
-  const list = getWeatherFavs(); list.push(p);
-  try { localStorage.setItem('weather_favs', JSON.stringify(list)); } catch {}
-  return list;
-}
-
-/** AUTH — только на authBase + /auth/* (никаких /api/v1/auth/*) */
-/* replaced by patch */>(`${authBase}/auth/login`, {method:'POST', body:{email,password}, auth:false});
-  if (r?.token) localStorage.setItem('token', r.token);
+/** ====== AUTH на authBase ====== */
+export async function login(email: string, password: string) {
+  const r = await http<{ token?: string; [k:string]: any }>(
+    `${authBase}/auth/login`,
+    { method:'POST', body:{ email, password }, auth:false }
+  );
+  if (r?.token) setToken(r.token);
   return r;
 }
-/* replaced by patch */;
-  if (username) payload.username = username;
-  if (avatarUrl) payload.photo_url = avatarUrl;
-  const r = await http<{token?:string; [k:string]:any}>(`${authBase}/auth/register`, {method:'POST', body:payload, auth:false});
-  if (r?.token) localStorage.setItem('token', r.token);
+
+export async function register(
+  name: string,
+  email: string,
+  password: string,
+  username?: string,
+  avatarUrl?: string
+) {
+  const body: any = { name, email, password };
+  if (username) body.username = username;
+  if (avatarUrl) body.photo_url = avatarUrl;
+
+  const r = await http<{ token?: string; [k:string]: any }>(
+    `${authBase}/auth/register`,
+    { method:'POST', body, auth:false }
+  );
+  if (r?.token) setToken(r.token);
   return r;
 }
-/* replaced by patch *//auth/${provider}/redirect`;
+
+export function oauthStart(provider: 'google'|'vk'|'yandex'|'apple') {
+  // редиректим на backend-роут/oauth-провайдера
+  window.location.href = `${authBase}/auth/${provider}/redirect`;
 }
 
-/** SETTINGS helpers */
-export async function settingsUpdate(patch:any){ return await http<any>(`${base}/settings`, {method:'PATCH', body:patch}); }
-export async function updateUsername(username: string){ return settingsUpdate({ username }); }
-export async function updateAvatar(photo_url: string){ return settingsUpdate({ photo_url }); }
+export function isAuthed() {
+  return !!getToken();
+}
 
-// ---- AUTH (patched) ----
-export async function login(email:string, password:string){
-  const r = await (await import('./api')).defaultFetch?.(`${config.authBase}/auth/login`)?.catch?.(()=>null);
-  // если defaultFetch отсутствует — используем локальный http:
-  // @ts-ignore
-  if(!r){
-    const http = (await import('./api')).http || (async (u:string,o:any)=> { const res=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(o.body)}); return res.json(); });
+/** ====== API на apiBase (/api/v1/...) ====== */
+
+// лента
+export async function feed(limit=10, offset=0) {
+  return http(`${base}/feed?limit=${limit}&offset=${offset}`, { method:'GET' });
+}
+
+// карта: точки
+export type BBox = { west:number; south:number; east:number; north:number };
+export async function points(limit=500, bbox?: BBox) {
+  const params = new URLSearchParams();
+  params.set('limit', String(limit));
+  if (bbox) {
+    params.set('bbox', `${bbox.west},${bbox.south},${bbox.east},${bbox.north}`);
   }
-  // финальная реализация
-  const res = await fetch(`${config.authBase}/auth/login`, {method:'POST', headers:{'Content-Type':'application/json','Accept':'application/json'}, body: JSON.stringify({email,password})});
-  const data = await res.json();
-  if(!res.ok) throw new Error(data?.message||'Login failed');
-  if(data?.token) localStorage.setItem('token', data.token);
-  return data;
+  return http(`${base}/map/points?${params.toString()}`, { method:'GET' });
 }
-export async function register(name:string, email:string, password:string, username?:string, avatarUrl?:string){
-  const body:any={name,email,password}; if(username) body.username=username; if(avatarUrl) body.photo_url=avatarUrl;
-  const res = await fetch(`${config.authBase}/auth/register`, {method:'POST', headers:{'Content-Type':'application/json','Accept':'application/json'}, body: JSON.stringify(body)});
-  const data = await res.json();
-  if(!res.ok) throw new Error(data?.message||'Register failed');
-  if(data?.token) localStorage.setItem('token', data.token);
-  return data;
+
+// детали улова
+export async function catchById(id: number|string) {
+  return http(`${base}/catch/${id}`, { method:'GET' });
 }
-export function oauthStart(provider:'google'|'vk'|'yandex'|'apple'){
-  window.location.href = `${config.authBase}/auth/${provider}/redirect`;
+
+// комментарий к улову
+export async function addComment(catchId: number|string, text: string) {
+  return http(`${base}/catch/${catchId}/comments`, { method:'POST', body:{ text } });
+}
+
+// профиль
+export async function profileMe() {
+  return http(`${base}/profile/me`, { method:'GET' });
+}
+
+// уведомления
+export async function notifications() {
+  return http(`${base}/notifications`, { method:'GET' });
+}
+
+// сохранение избранной точки для погоды (только для авторизованных)
+export async function saveWeatherFav(lat: number, lng: number, label?: string) {
+  if (config.auth?.requireAuthForWeatherSave && !isAuthed()) {
+    const err: any = new Error('Требуется авторизация для сохранения точки погоды');
+    err.code = 'AUTH_REQUIRED';
+    throw err;
+  }
+  return http(`${base}/weather/favs`, { method:'POST', body:{ lat, lng, label } });
+}
+
+// получить избранные точки погоды
+export async function getWeatherFavs() {
+  return http(`${base}/weather/favs`, { method:'GET' });
+}
+
+// добавление улова (минимально)
+export async function addCatch(payload: {
+  lat:number; lng:number; species?:string; length?:number; weight?:number;
+  method?:string; bait?:string; gear?:string; caption?:string; photo_url?:string; caught_at?:string;
+}) {
+  return http(`${base}/catch`, { method:'POST', body: payload });
+}
+
+// добавление места (минимально)
+export async function addPlace(payload: {
+  lat:number; lng:number; title:string; description?:string; photos?:string[];
+}) {
+  return http(`${base}/map/places`, { method:'POST', body: payload });
 }
