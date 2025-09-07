@@ -1,78 +1,123 @@
-import React, { useEffect, useState } from 'react';
-import { feed, likeCatch, rateCatch, bonusAward } from '../api';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import AppShell from '../components/AppShell';
 import Icon from '../components/Icon';
 import config from '../config';
-import { Link } from 'react-router-dom';
-import RatingStars from '../components/RatingStars';
-import BannerSlot from '../components/BannerSlot';
-import { pushToast } from '../components/Toast';
+import { feed, likeCatch, rateCatch, bonusAward } from '../api';
 
-const FeedScreen: React.FC = () => {
-  const [items, setItems] = useState<any[]>([]);
-  const [err, setErr] = useState('');
+type FeedItem = {
+  id: number|string;
+  user?: { name?: string; avatar?: string };
+  title?: string;
+  text?: string;
+  media?: string[];
+  likes?: number;
+  rating?: number;
+  created_at?: string;
+};
+
+export default function FeedScreen(){
+  const [items, setItems] = useState<FeedItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string|null>(null);
+  const refreshMs = useMemo(()=> {
+    const v = (config as any)?.ui?.feedEvery;
+    return typeof v === 'number' && v >= 0 ? v : 60000;
+  }, []);
+  const timer = useRef<number|undefined>(undefined);
+
+  async function load(reset=false){
+    setErr(null);
+    if (loading) return;
+    setLoading(true);
+    try{
+      const data = await feed(10, reset ? 0 : items.length);
+      const list = Array.isArray((data as any)?.items) ? (data as any).items
+                 : Array.isArray(data) ? data
+                 : [];
+      setItems(prev => reset ? list : [...prev, ...list]);
+    }catch(e:any){
+      setErr(e?.message ?? 'Не удалось загрузить ленту');
+    }finally{
+      setLoading(false);
+    }
+  }
 
   useEffect(()=>{
-    feed({limit:20, offset:0})
-      .then((r)=> Array.isArray(r)? setItems(r) : setItems([]))
-      .catch((e)=> setErr(e.message||'Ошибка загрузки ленты'));
-  },[]);
+    load(true);
+    if (refreshMs > 0){
+      timer.current = window.setInterval(()=> load(true), refreshMs);
+    }
+    return ()=> { if (timer.current) window.clearInterval(timer.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  async function onLike(id:any){
+  const onLike = async (id: number|string)=>{
     try{
       await likeCatch(id);
-      pushToast('Лайк засчитан');
-      // Попытка начислить бонус (если бэк поддерживает)
-      bonusAward('like', {catch_id:id}).catch(()=>{});
-    }catch(e:any){ pushToast(e?.message||'Ошибка'); }
-  }
-  async function onRate(id:any, stars:number){
+      setItems(prev => prev.map(it => it.id===id ? {...it, likes: (it.likes ?? 0)+1} : it));
+      await bonusAward('like', { id });
+    }catch{}
+  };
+
+  const onRate = async (id: number|string, stars:number)=>{
     try{
       await rateCatch(id, stars);
-      pushToast(`Оценка ${stars}/5 сохранена`);
-      bonusAward('like', {kind:'rate', catch_id:id, stars}).catch(()=>{});
-    }catch(e:any){ pushToast(e?.message||'Ошибка'); }
-  }
-
-  const spaced = [];
-  const every = config.banners.feedEvery;
-  for (let i=0;i<items.length;i++){
-    spaced.push({kind:'post', data:items[i]});
-    if ((i+1) % every === 0) spaced.push({kind:'banner', slot:`feed_${(i+1)/every}`});
-  }
+      setItems(prev => prev.map(it => it.id===id ? {...it, rating: stars} : it));
+      await bonusAward('rate', { id, stars });
+    }catch{}
+  };
 
   return (
-    <div className="container">
-      <h2 className="h2">Лента</h2>
-      {err && <div className="card glass" style={{color:'#ffb4b4'}}>{err}</div>}
+    <AppShell>
+      <div className="glass card" style={{display:'grid',gap:12}}>
+        <div className="row" style={{justifyContent:'space-between'}}>
+          <div className="row"><Icon name="home" /><b>Лента</b></div>
+          <button className="btn ghost" onClick={()=>load(true)} disabled={loading}>
+            <Icon name="refresh" /> Обновить
+          </button>
+        </div>
 
-      {(spaced.length? spaced : items.map(x=>({kind:'post', data:x}))).map((row:any, idx:number)=>{
-        if (row.kind==='banner') return <BannerSlot key={`b-${idx}`} slot={row.slot} />;
-        const it = row.data;
-        return (
-          <div key={it.id ?? idx} className="glass card">
-            <div className="row" style={{justifyContent:'space-between'}}>
-              <div className="row">
-                <strong>{it.user_name || 'рыбак'}</strong>
-                <span className="muted">· {new Date(it.created_at||Date.now()).toLocaleString()}</span>
+        {err && <div className="help">{err}</div>}
+
+        {!err && items.length===0 && !loading && (
+          <div className="help">Пока нет записей. Попробуйте позже.</div>
+        )}
+
+        <div style={{display:'grid', gap:12}}>
+          {items.map(it=>(
+            <div key={String(it.id)} className="glass card" style={{padding:12}}>
+              <div className="row" style={{gap:10}}>
+                <img src={it.user?.avatar ?? '/default-avatar.png'} alt="" style={{width:40,height:40,borderRadius:12}}/>
+                <div>
+                  <b>{it.user?.name ?? 'Аноним'}</b>
+                  <div className="help">{it.created_at ? new Date(it.created_at).toLocaleString() : ''}</div>
+                </div>
               </div>
-              <div className="row">
-                <button className="btn" onClick={()=>onLike(it.id)}><Icon name={config.icons.like} /> {it.likes_count ?? 0}</button>
-                <Link className="btn" to={`/catch/${it.id}`}><Icon name={config.icons.comment} /> {it.comments_count ?? 0}</Link>
-                <button className="btn"><Icon name={config.icons.share} /> Поделиться</button>
+              {it.title && <div style={{marginTop:8}}><b>{it.title}</b></div>}
+              {it.text && <div style={{marginTop:6}}>{it.text}</div>}
+              {Array.isArray(it.media) && it.media.length>0 && (
+                <div className="grid-3" style={{marginTop:8}}>
+                  {it.media.slice(0,3).map((m,idx)=>(
+                    <img key={idx} src={m} alt="" style={{width:'100%',height:100,objectFit:'cover',borderRadius:12}} />
+                  ))}
+                </div>
+              )}
+
+              <div className="row" style={{gap:8, marginTop:10}}>
+                <button className="btn ghost" onClick={()=>onLike(it.id)}><Icon name="favorite" /> {(it.likes??0)}</button>
+                <button className="btn ghost" onClick={()=>onRate(it.id, 5)}><Icon name="star" /> {(it.rating??0)}</button>
+                <a className="btn ghost" href={`/catch/${it.id}`}><Icon name="open_in_new" /> Открыть</a>
               </div>
             </div>
+          ))}
+        </div>
 
-            {it.media_url && <img src={it.media_url} alt="" style={{width:'100%', borderRadius:12, marginTop:8}} />}
-            {it.caption && <div style={{marginTop:8}}>{it.caption}</div>}
-
-            <div className="row" style={{marginTop:8, justifyContent:'space-between', alignItems:'center'}}>
-              <div className="muted">Оцените улов</div>
-              <RatingStars value={Math.round(it.rating_avg || 0)} onChange={(v)=>onRate(it.id, v)} />
-            </div>
-          </div>
-        );
-      })}
-    </div>
+        <div className="row" style={{justifyContent:'center', marginTop:4}}>
+          <button className="btn primary" onClick={()=>load(false)} disabled={loading}>
+            <Icon name="expand_more" /> Ещё
+          </button>
+        </div>
+      </div>
+    </AppShell>
   );
-};
-export default FeedScreen;
+}

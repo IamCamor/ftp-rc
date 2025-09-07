@@ -5,13 +5,16 @@ const config = {
     logoUrl: '/logo.svg',
     defaultAvatar: '/default-avatar.png',
   },
+  ui: {
+    // период авто-обновления ленты в мс (можно отключить = 0)
+    feedEvery: 60000,
+  },
   flags: {
     glass: true,
-    // если на бэке нет ручек /api/v1/auth/login|register — выключаем password auth
     authPasswordEnabled: false,
     authOAuthEnabled: true,
-    notificationsEnabled: false, // включите, когда появится /api/v1/notifications
-    profileEnabled: false,        // включите, когда появится /api/v1/profile/me
+    notificationsEnabled: false,
+    profileEnabled: false,
     requireAuthForWeatherSave: false,
   },
   legal: {
