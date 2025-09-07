@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 
 import Header from './components/Header';
 import BottomNav from './components/BottomNav';
+import ToastHost from './components/Toast';
 
 import FeedScreen from './pages/FeedScreen';
 import MapScreen from './pages/MapScreen';
@@ -16,6 +17,10 @@ import PlaceDetailPage from './pages/PlaceDetailPage';
 
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
+import FriendsPage from './pages/FriendsPage';
+import SettingsPage from './pages/SettingsPage';
+import BonusesPage from './pages/BonusesPage';
+import LeaderboardPage from './pages/LeaderboardPage';
 import { isAuthed } from './api';
 
 const ProtectedRoute: React.FC<{ children: React.ReactElement }> = ({ children }) => {
@@ -37,6 +42,7 @@ const AppRoot: React.FC = () => {
             <Route path="/place/:id" element={<PlaceDetailPage />} />
             <Route path="/weather" element={<WeatherPage />} />
             <Route path="/alerts" element={<NotificationsPage />} />
+
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
 
@@ -44,11 +50,17 @@ const AppRoot: React.FC = () => {
             <Route path="/add/place" element={<ProtectedRoute><AddPlacePage /></ProtectedRoute>} />
             <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
 
+            <Route path="/friends" element={<ProtectedRoute><FriendsPage /></ProtectedRoute>} />
+            <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
+            <Route path="/bonuses" element={<ProtectedRoute><BonusesPage /></ProtectedRoute>} />
+            <Route path="/leaderboard" element={<LeaderboardPage />} />
+
             <Route path="*" element={<Navigate to="/feed" replace />} />
           </Routes>
         </main>
         <BottomNav />
       </div>
+      <ToastHost />
       <style>{`
         .app-shell { min-height: 100svh; display: grid; grid-template-rows: auto 1fr auto; }
         .app-main { min-height: 0; }

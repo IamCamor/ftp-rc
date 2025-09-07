@@ -1,10 +1,9 @@
 import React from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import config from '../config';
 import Icon from './Icon';
 
 const Header: React.FC = () => {
-  const { pathname } = useLocation();
   const logo = config?.images?.logoUrl || '/src/assets/logo.svg';
   return (
     <header className="header glass">

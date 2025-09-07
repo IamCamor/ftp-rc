@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import config from '../config';
 import { profileMe, isAuthed, logout } from '../api';
+import { Link } from 'react-router-dom';
+import Icon from '../components/Icon';
 
 const ProfilePage: React.FC = () => {
   const [me, setMe] = useState<any>(null);
@@ -31,6 +33,25 @@ const ProfilePage: React.FC = () => {
         )}
       </div>
       {err && <div className="card glass" style={{color:'#ffb4b4', marginTop:10}}>{err}</div>}
+
+      <div className="grid" style={{marginTop:12}}>
+        <Link to="/friends" className="glass card row" style={{justifyContent:'space-between'}}>
+          <div className="row"><Icon name={config.icons.friends} /> Друзья</div>
+          <Icon name="chevron_right" />
+        </Link>
+        <Link to="/bonuses" className="glass card row" style={{justifyContent:'space-between'}}>
+          <div className="row"><Icon name={config.icons.gift} /> Бонусы и история</div>
+          <Icon name="chevron_right" />
+        </Link>
+        <Link to="/leaderboard" className="glass card row" style={{justifyContent:'space-between'}}>
+          <div className="row"><Icon name={config.icons.leaderboard} /> Лидерборд</div>
+          <Icon name="chevron_right" />
+        </Link>
+        <Link to="/settings" className="glass card row" style={{justifyContent:'space-between'}}>
+          <div className="row"><Icon name={config.icons.settings} /> Настройки профиля</div>
+          <Icon name="chevron_right" />
+        </Link>
+      </div>
     </div>
   );
 };

@@ -7,18 +7,17 @@ type HttpOptions = {
   headers?: Record<string,string>;
 };
 
-function getToken(): string | null {
-  try { return localStorage.getItem('token'); } catch { return null; }
-}
+function getToken(): string | null { try { return localStorage.getItem('token'); } catch { return null; } }
+export function isAuthed(){ return !!getToken(); }
+export function logout(){ try { localStorage.removeItem('token'); } catch {} }
 
 async function http<T=any>(url: string, opts: HttpOptions = {}): Promise<T> {
   const { method='GET', body, auth=true, headers={} } = opts;
   const token = getToken();
-
   const res = await fetch(url, {
     method,
     mode: 'cors',
-    credentials: 'omit', // CORS на бэке уже ок — передаём токен заголовком
+    credentials: 'omit',
     headers: {
       'Accept': 'application/json',
       ...(body ? {'Content-Type': 'application/json'} : {}),
@@ -28,17 +27,18 @@ async function http<T=any>(url: string, opts: HttpOptions = {}): Promise<T> {
     body: body ? JSON.stringify(body) : undefined,
   });
 
-  if (res.status === 204) return undefined as unknown as T;
-
-  let data: any = null;
   const text = await res.text().catch(()=> '');
+  let data: any = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = text; }
 
   if (!res.ok) {
     const msg = (data && (data.message || data.error)) || `${res.status} ${res.statusText}`;
-    throw new Error(msg);
+    const err: any = new Error(msg);
+    err.status = res.status;
+    err.payload = data;
+    throw err;
   }
-  return data as T;
+  return (data ?? undefined) as T;
 }
 
 function unwrap<T=any>(x: any, fallback: T): T {
@@ -49,8 +49,9 @@ function unwrap<T=any>(x: any, fallback: T): T {
 }
 
 const base = config.apiBase;
+const authBase = config.authBase;
 
-// feed
+/** DATA */
 export async function feed(params: {limit?: number; offset?: number} = {}) {
   const q = new URLSearchParams();
   if (params.limit) q.set('limit', String(params.limit));
@@ -58,85 +59,52 @@ export async function feed(params: {limit?: number; offset?: number} = {}) {
   const r = await http<any>(`${base}/feed${q.toString()?`?${q.toString()}`:''}`);
   return unwrap<any[]>(r, []);
 }
-
-// map points
-export async function points(bbox?: string, limit = 500) {
+export async function points(bbox?: string, limit:number=500) {
   const q = new URLSearchParams();
   q.set('limit', String(limit));
   if (bbox) q.set('bbox', bbox);
   const r = await http<any>(`${base}/map/points?${q.toString()}`);
   return unwrap<any[]>(r, []);
 }
-
-// catch & place details
 export async function catchById(id: string|number){ return await http<any>(`${base}/catch/${id}`); }
 export async function placeById(id: string|number){ return await http<any>(`${base}/place/${id}`); }
-
-// comments / likes (потребуют рабочие маршруты на бэке)
-export async function addCatchComment(id:number|string, text:string){
-  return await http(`${base}/catch/${id}/comments`, {method:'POST', body:{text}});
-}
-export async function likeCatch(id:number|string){
-  return await http(`${base}/catch/${id}/like`, {method:'POST'});
-}
-
-// notifications
-export async function notifications() {
-  const r = await http<any>(`${base}/notifications`);
-  return unwrap<any[]>(r, []);
-}
-
-// profile
+export async function addCatchComment(id:number|string, text:string){ return await http(`${base}/catch/${id}/comments`, {method:'POST', body:{text}}); }
+export async function likeCatch(id:number|string){ return await http(`${base}/catch/${id}/like`, {method:'POST'}); }
+export async function notifications(){ const r = await http<any>(`${base}/notifications`); return unwrap<any[]>(r, []); }
 export async function profileMe(){ return await http<any>(`${base}/profile/me`); }
+export async function addCatch(payload: any){ return await http(`${base}/catch`, {method:'POST', body: payload}); }
+export async function addPlace(payload: any){ return await http(`${base}/place`, {method:'POST', body: payload}); }
 
-// weather favs (локально)
+/** WEATHER FAVS — локальное хранилище */
 export function getWeatherFavs(): Array<{lat:number; lng:number; title?:string; id?:string|number}> {
-  try {
-    const raw = localStorage.getItem('weather_favs');
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+  try { const raw = localStorage.getItem('weather_favs'); const parsed = raw ? JSON.parse(raw) : []; return Array.isArray(parsed) ? parsed : []; }
+  catch { return []; }
 }
 export function saveWeatherFav(p: {lat:number; lng:number; title?:string}) {
-  const list = getWeatherFavs();
-  list.push(p);
+  const list = getWeatherFavs(); list.push(p);
   try { localStorage.setItem('weather_favs', JSON.stringify(list)); } catch {}
   return list;
 }
 
-// add catch/place (формы)
-export async function addCatch(payload: {
-  species?: string; length?: number; weight?: number;
-  style?: string; lure?: string; tackle?: string;
-  notes?: string; photo_url?: string;
-  lat?: number; lng?: number; caught_at?: string; // ISO
-  privacy?: 'all'|'friends'|'private';
-}) {
-  return await http(`${base}/catch`, {method:'POST', body: payload});
-}
-
-export async function addPlace(payload: {
-  title: string; description?: string;
-  lat: number; lng: number;
-  photos?: string[];
-}) {
-  return await http(`${base}/place`, {method:'POST', body: payload});
-}
-
-// auth
-/* replaced by patch */>(`${base}/auth/login`, {method:'POST', body:{email,password}, auth:false});
+/** AUTH — только на authBase + /auth/* (никаких /api/v1/auth/*) */
+/* replaced by patch */>(`${authBase}/auth/login`, {method:'POST', body:{email,password}, auth:false});
   if (r?.token) localStorage.setItem('token', r.token);
   return r;
 }
-/* replaced by patch */>(`${base}/auth/register`, {method:'POST', body:{name,email,password}, auth:false});
+/* replaced by patch */;
+  if (username) payload.username = username;
+  if (avatarUrl) payload.photo_url = avatarUrl;
+  const r = await http<{token?:string; [k:string]:any}>(`${authBase}/auth/register`, {method:'POST', body:payload, auth:false});
   if (r?.token) localStorage.setItem('token', r.token);
   return r;
 }
-export function logout(){ try { localStorage.removeItem('token'); } catch {} }
-export function isAuthed(){ return !!getToken(); }
-const authBase = config.authBase;
+/* replaced by patch *//auth/${provider}/redirect`;
+}
+
+/** SETTINGS helpers */
+export async function settingsUpdate(patch:any){ return await http<any>(`${base}/settings`, {method:'PATCH', body:patch}); }
+export async function updateUsername(username: string){ return settingsUpdate({ username }); }
+export async function updateAvatar(photo_url: string){ return settingsUpdate({ photo_url }); }
 
 // ---- AUTH (patched) ----
 export async function login(email:string, password:string){

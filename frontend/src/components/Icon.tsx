@@ -1,18 +1,14 @@
 import React from 'react';
 
-type Props = {
-  name: string;
-  size?: number | string; // 24 по умолчанию
-  className?: string;
-  title?: string;
-};
-const Icon: React.FC<Props> = ({ name, size=24, className='', title }) => {
-  const s = typeof size === 'number' ? `${size}px` : size;
-  return (
-    <span className={`material-symbols-rounded ${className}`} style={{fontSize:s, lineHeight:1}} aria-hidden title={title}>
-      {name}
-    </span>
-  );
-};
+const Icon: React.FC<{name:string; size?:number; className?:string; title?:string}> = ({name, size=24, className='', title}) => (
+  <span
+    className={`material-symbols-rounded ${className}`}
+    style={{fontSize: size, lineHeight: 1, display:'inline-flex', verticalAlign:'middle'}}
+    aria-hidden={title? undefined : true}
+    title={title}
+  >
+    {name}
+  </span>
+);
 
 export default Icon;

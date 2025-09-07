@@ -1,73 +1,38 @@
-:root{
-  --bg: #0b1220;
-  --card: rgba(255,255,255,.06);
-  --stroke: rgba(255,255,255,.14);
-  --text: #e6f1ff;
-  --muted: rgba(230,241,255,.75);
-  --accent: #0ea5e9;
-}
-*{box-sizing:border-box}
-html,body,#root{height:100%}
-body{
-  margin:0;
-  color:var(--text);
-  background:
-    radial-gradient(1200px 600px at 20% -10%, rgba(14,165,233,.25), transparent 50%),
-    radial-gradient(800px 500px at 120% 10%, rgba(99,102,241,.22), transparent 50%),
-    linear-gradient(180deg, #0b1220 0%, #0b1220 100%);
-  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
-}
-a{color:inherit;text-decoration:none}
-button{font:inherit}
-.container{padding:16px}
-.h1{font-size:1.5rem;margin:0 0 12px}
-.h2{font-size:1.25rem;margin:0 0 10px}
-.muted{color:var(--muted)}
-.row{display:flex;gap:8px;align-items:center}
-.grid{display:grid;gap:12px}
-
-.glass{
-  background: var(--card);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid var(--stroke);
-}
-.card{border-radius:14px;padding:12px}
-
-.btn{
-  display:inline-flex;align-items:center;gap:8px;
-  padding:10px 14px;border-radius:12px;
-  background:rgba(255,255,255,.08);
-  border:1px solid rgba(255,255,255,.18);
-  color:var(--text);cursor:pointer
-}
-.btn.primary{background:var(--accent);border-color:transparent;color:white}
-.btn.full{width:100%;justify-content:center}
-
-.input, .select, .textarea{
-  width:100%;padding:10px 12px;border-radius:12px;
-  background:rgba(255,255,255,.06);
-  border:1px solid rgba(255,255,255,.2);color:var(--text)
+:root {
+  --blur-bg: rgba(18, 18, 18, 0.5);
+  --blur-bg-light: rgba(255,255,255,0.55);
+  --backdrop: blur(12px) saturate(120%);
 }
 
-.header{
-  position:sticky;top:0;z-index:20;
-  display:flex;align-items:center;justify-content:space-between;
-  padding:8px 12px;border-bottom:1px solid var(--stroke)
+.glass {
+  background: var(--blur-bg);
+  backdrop-filter: var(--backdrop);
+  -webkit-backdrop-filter: var(--backdrop);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 16px;
 }
-.header .left,.header .right{display:flex;align-items:center;gap:8px}
 
-.bottom-nav{
-  position:sticky;bottom:0;z-index:20;
-  display:grid;grid-template-columns:repeat(5,1fr);gap:6px;
-  padding:8px;border-top:1px solid var(--stroke)
+.glass-light {
+  background: var(--blur-bg-light);
+  backdrop-filter: var(--backdrop);
+  -webkit-backdrop-filter: var(--backdrop);
+  border: 1px solid rgba(0,0,0,0.06);
+  border-radius: 16px;
 }
-.bottom-link{
-  display:flex;flex-direction:column;align-items:center;gap:4px;
-  padding:8px;border-radius:12px;background:rgba(255,255,255,.04)
-}
-.bottom-link.active{background:rgba(255,255,255,.12)}
 
-.media-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
-.media-grid img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:10px}
-.leaflet-container{width:100%;height:calc(100svh - 140px);border-radius:14px;overflow:hidden}
+/* Контейнер карты — на всю высоту окна за вычетом шапки/нави */
+#map-container {
+  width: 100%;
+  height: 100dvh; /* запас по умолчанию */
+}
+
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+}
+
+/* Небольшая тень для панелей */
+.card {
+  border-radius: 14px;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.12);
+}

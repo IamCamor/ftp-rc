@@ -15,7 +15,7 @@ const WeatherPage: React.FC = () => {
           {list.map((p, idx) => (
             <li key={idx} className="card glass">
               <div style={{fontWeight:600}}>{p.title || `Точка (${p.lat.toFixed(4)}, ${p.lng.toFixed(4)})`}</div>
-              <div className="muted">температура: — / ветер: — (добавим, когда появится серверный маршрут)</div>
+              <div className="muted">температура: — / ветер: —</div>
             </li>
           ))}
         </ul>
