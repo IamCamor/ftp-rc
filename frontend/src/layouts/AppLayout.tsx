@@ -2,17 +2,11 @@ import React from 'react';
 import Header from '../components/Header';
 import BottomNav from '../components/BottomNav';
 
-type Props = {
-  children: React.ReactNode;
-};
-
-const AppLayout: React.FC<Props> = ({ children }) => {
+const AppLayout: React.FC<React.PropsWithChildren> = ({ children }) => {
   return (
-    <div>
+    <div className="app-shell">
       <Header />
-      <main className="main-wrap">
-        {children}
-      </main>
+      <main className="app-content">{children}</main>
       <BottomNav />
     </div>
   );
