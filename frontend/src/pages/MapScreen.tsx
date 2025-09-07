@@ -1,115 +1,146 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import config, { featureFlags } from '../config';
 import { points, saveWeatherFav, isAuthed } from '../api';
-import config from '../config';
-import Confirm from '../components/Confirm';
-import { pushToast } from '../components/Toast';
+import Icon from '../components/Icon';
 
-// ленивый загрузчик Leaflet (ожидается utils/leafletLoader.ts, если нет — инлайним простой)
-async function loadLeaflet() {
-  const L = await import('leaflet');
-  // css пусть уже подключён в index.html; если нет — карта всё равно работает, только без стилей
-  return L;
+// простая загрузка Leaflet (CDN), чтобы карта всегда рисовалась
+function useLeaflet() {
+  const [ready, setReady] = useState<boolean>(!!(window as any).L);
+
+  useEffect(() => {
+    if ((window as any).L) { setReady(true); return; }
+
+    const linkId = 'leaflet-css-cdn';
+    if (!document.getElementById(linkId)) {
+      const link = document.createElement('link');
+      link.id = linkId;
+      link.rel = 'stylesheet';
+      link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+      link.integrity = 'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=';
+      link.crossOrigin = '';
+      document.head.appendChild(link);
+    }
+
+    const scriptId = 'leaflet-js-cdn';
+    if (!document.getElementById(scriptId)) {
+      const s = document.createElement('script');
+      s.id = scriptId;
+      s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+      s.integrity = 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=';
+      s.crossOrigin = '';
+      s.onload = () => setReady(true);
+      document.body.appendChild(s);
+    } else {
+      setReady(true);
+    }
+  }, []);
+
+  return ready;
 }
 
-type MapPoint = {
-  id: number|string;
-  lat: number; lng: number;
-  type?: 'place'|'catch';
-  title?: string;
-  preview?: string; // url
-};
+type Pt = { id: number|string; lat: number; lng: number; title?: string; thumbnail?: string; type?: string; };
 
-const MapScreen: React.FC = () => {
-  const nav = useNavigate();
-  const mapRef = useRef<any>(null);
-  const [pts, setPts] = useState<MapPoint[]>([]);
-  const [L, setL] = useState<any>(null);
+export default function MapScreen() {
+  const navigate = useNavigate();
+  const mapRef = useRef<HTMLDivElement | null>(null);
+  const leafletReady = useLeaflet();
+  const REQUIRE_AUTH_WEATHER = (featureFlags?.requireAuthForWeatherSave ?? false);
 
-  // confirm dialog state
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const pendingRef = useRef<{lat:number; lng:number; title?:string} | null>(null);
+  useEffect(() => {
+    if (!leafletReady || !mapRef.current) return;
+    const L = (window as any).L;
+    if (!L) return;
 
-  useEffect(()=> {
-    (async ()=>{
-      const _L = await loadLeaflet(); setL(_L);
-      const data = await points(undefined, 500).catch(()=>[]);
-      setPts(Array.isArray(data) ? data : []);
-      // init map
-      const m = _L.map('map', { center:[55.75,37.6], zoom:10 });
-      _L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(m);
-      mapRef.current = m;
+    // инициализация карты
+    const map = L.map(mapRef.current).setView([55.751244, 37.618423], 9);
+    const tileUrl = (config as any)?.map?.tiles ??
+      'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+    L.tileLayer(tileUrl, { maxZoom: 19 }).addTo(map);
 
-      // отрисовка
-      (Array.isArray(data)? data:[]).forEach((p:any)=>{
-        const marker = _L.marker([p.lat, p.lng]).addTo(m);
-        const html = `
-          <div style="min-width:180px">
-            <div style="font-weight:600;margin-bottom:6px">${p.title || 'Точка'}</div>
-            ${p.preview ? `<img src="${p.preview}" alt="" style="width:100%;height:100px;object-fit:cover;border-radius:8px" />`: ''}
-            <div style="margin-top:6px;display:flex;gap:8;justify-content:flex-end">
-              <a href="/place/${p.id}" data-id="${p.id}" data-type="${p.type||'place'}">Открыть</a>
+    // Загрузка точек
+    (async () => {
+      try {
+        const raw = await points({ limit: 500 });
+        const arr: Pt[] = Array.isArray(raw) ? raw : (Array.isArray((raw as any)?.items) ? (raw as any).items : []);
+        arr.forEach((p) => {
+          if (typeof p?.lat !== 'number' || typeof p?.lng !== 'number') return;
+          const m = L.marker([p.lat, p.lng]).addTo(map);
+          const inner = `
+            <div style="display:flex;gap:8px;align-items:center">
+              ${p.thumbnail ? `<img src="${p.thumbnail}" style="width:56px;height:56px;object-fit:cover;border-radius:8px" />` : ''}
+              <div>
+                <div style="font-weight:600">${p.title ?? 'Точка'}</div>
+                <button data-id="${p.id}" class="go-detail" style="margin-top:6px;padding:6px 10px;border-radius:8px;background:#0ea5e9;color:#fff;border:0;cursor:pointer">Открыть</button>
+              </div>
             </div>
-          </div>`;
-        marker.bindPopup(html);
-        marker.on('popupopen', (e:any)=>{
-          // перехватить клик по ссылке, чтобы уйти через router
-          setTimeout(()=>{
-            const el = (e as any).popup?._contentNode?.querySelector('a[data-id]');
-            if(el){
-              el.addEventListener('click', (ev:any)=>{
-                ev.preventDefault();
-                const id = el.getAttribute('data-id');
-                const t = el.getAttribute('data-type');
-                nav(t==='catch'? `/catch/${id}` : `/place/${id}`);
-              }, { once:true });
+          `;
+          m.bindPopup(inner);
+
+          m.on('popupopen', (e: any) => {
+            const el = e.popup.getElement() as HTMLElement;
+            const btn = el.querySelector('.go-detail') as HTMLButtonElement | null;
+            if (btn) {
+              btn.onclick = () => {
+                if (p.type === 'catch') {
+                  navigate(`/catch/${p.id}`);
+                } else {
+                  navigate(`/place/${p.id}`);
+                }
+              };
             }
-          }, 0);
+          });
         });
-      });
-
-      // клик по карте — предложить сохранить в погоду
-      m.on('click', (ev:any)=>{
-        const { lat, lng } = ev.latlng || {};
-        if (!lat || !lng) return;
-        pendingRef.current = { lat, lng, title: `Точка ${lat.toFixed(4)}, ${lng.toFixed(4)}` };
-        setConfirmOpen(true);
-      });
-    })();
-  }, [nav]);
-
-  function onCancel(){ setConfirmOpen(false); pendingRef.current = null; }
-  function onConfirm(){
-    setConfirmOpen(false);
-    const p = pendingRef.current; pendingRef.current = null;
-    if(!p) return;
-    if (config.auth.requireAuthForWeatherSave && !isAuthed()){
-      if (confirm('Сохранять точки могут только авторизованные.\nПерейти к авторизации?')){
-        window.location.href = '/login';
+      } catch (e) {
+        console.error('points load error', e);
       }
-      return;
-    }
-    saveWeatherFav(p);
-    pushToast('Точка сохранена для страницы погоды');
-  }
+    })();
 
+    // Клик по карте → предложение сохранить точку для погоды
+    map.on('click', async (ev: any) => {
+      const { lat, lng } = ev.latlng || {};
+      if (typeof lat !== 'number' || typeof lng !== 'number') return;
+
+      if (REQUIRE_AUTH_WEATHER && !(await isAuthed())) {
+        const go = confirm('Сохранение точки доступно только авторизованным пользователям. Войти сейчас?');
+        if (go) navigate('/login');
+        return;
+      }
+
+      const doSave = confirm('Сохранить эту точку для страницы погоды?');
+      if (!doSave) return;
+
+      const name = prompt('Название точки', 'Моя точка');
+      try {
+        await saveWeatherFav({ lat, lng, name: name || 'Моя точка' });
+        alert('Точка сохранена. Проверьте на странице Погоды.');
+      } catch (e) {
+        console.error('saveWeatherFav error', e);
+        alert('Не удалось сохранить точку');
+      }
+    });
+
+    return () => map.remove();
+  }, [leafletReady]);
+
+  // Глассморфизм контейнер
   return (
-    <div className="container">
-      <div className="glass card" style={{marginBottom:8}}>
-        Нажмите по карте, чтобы предложить сохранить точку в “Погоду”. {config.auth.requireAuthForWeatherSave?'(Требуется вход)':''}
+    <div style={{
+      position:'relative',
+      width:'100%',
+      height:'calc(100dvh - 116px)' // хедер+меню
+    }}>
+      <div ref={mapRef} style={{width:'100%',height:'100%'}} />
+      <div style={{
+        position:'absolute', top:12, right:12,
+        backdropFilter:'blur(10px)',
+        background:'rgba(255,255,255,0.3)',
+        border:'1px solid rgba(255,255,255,0.4)',
+        borderRadius:16, padding:'8px 10px', display:'flex', gap:8
+      }}>
+        <Icon name="my_location" />
+        <span style={{fontWeight:600}}>Карта</span>
       </div>
-      <div id="map" style={{height:'70vh', width:'100%', borderRadius:16, overflow:'hidden'}} />
-      <Confirm
-        open={confirmOpen}
-        title="Сохранить точку?"
-        text="Добавить выбранную точку на страницу погоды?"
-        confirmText="Сохранить"
-        cancelText="Отмена"
-        onConfirm={onConfirm}
-        onCancel={onCancel}
-      />
     </div>
   );
-};
-
-export default MapScreen;
+}

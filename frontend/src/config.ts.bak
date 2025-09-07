@@ -105,17 +105,3 @@ const config: AppConfig = {
 };
 
 export default config;
-
-// --- auto-added feature flags ---
-export const featureFlags = {
-  requireAuthForWeatherSave: true,
-  oauth: {
-    google: true,
-    vk: true,
-    yandex: true,
-    apple: true,
-  },
-  banners: true,
-  ratings: true,
-  bonuses: true,
-};
