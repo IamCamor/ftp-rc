@@ -1,25 +1,37 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import config from '../config';
 import Icon from './Icon';
 
-const Header: React.FC = () => {
-  const logo = config?.images?.logoUrl || '/src/assets/logo.svg';
+type HeaderProps = {
+  title?: string;
+};
+
+const Header: React.FC<HeaderProps> = ({ title }) => {
+  const loc = useLocation();
+
   return (
-    <header className="header glass">
-      <div className="left">
-        <Link to="/feed" className="row" aria-label="На главную">
-          <img src={logo} alt="Logo" style={{height:28}} />
+    <header className="header glass" role="banner" aria-label="main header">
+      <Link to="/" className="icon-btn" aria-label="home">
+        <Icon name={config.icons.logo || 'waves'} size={24} />
+        <strong>{config.appName}</strong>
+      </Link>
+
+      <div className="header__spacer" />
+
+      {config.features.ui.showWeatherLinkInHeader && (
+        <Link to="/weather" className="icon-btn" aria-label="weather link">
+          <Icon name={config.icons.weather || 'partly_cloudy_day'} />
         </Link>
-      </div>
-      <div className="right">
-        <Link to="/weather" className="btn" title="Погода">
-          <Icon name={config.icons.weather} /> <span className="hide-sm">Погода</span>
-        </Link>
-        <Link to="/add/catch" className="btn primary" title="Добавить улов">
-          <Icon name={config.icons.add} /> <span className="hide-sm">Улов</span>
-        </Link>
-      </div>
+      )}
+
+      <Link to="/alerts" className="icon-btn" aria-label="notifications link">
+        <Icon name={config.icons.bell || 'notifications'} />
+      </Link>
+
+      <Link to="/profile" className="icon-btn" aria-label="profile link">
+        <Icon name={config.icons.profile || 'account_circle'} />
+      </Link>
     </header>
   );
 };

@@ -5,184 +5,462 @@ ROOT="$(pwd)"
 SRC="$ROOT/src"
 [ -d "$ROOT/frontend/src" ] && SRC="$ROOT/frontend/src"
 
-API="$SRC/api.ts"
+mkdir -p "$SRC/components" "$SRC/layouts" "$SRC/styles" "$SRC/utils"
 
-mkdir -p "$SRC"
-
-cat > "$API" <<'TS'
-import config from './config';
-
-/** ====== helpers ====== */
-type HttpOpts = {
-  method?: 'GET'|'POST'|'PUT'|'PATCH'|'DELETE';
-  body?: any;
-  headers?: Record<string,string>;
-  auth?: boolean;           // добавлять Bearer токен
-  credentials?: RequestCredentials; // по умолчанию 'omit'
+###############################################################################
+# config.ts – единая точка правды
+###############################################################################
+cat > "$SRC/config.ts" <<'TS'
+type IconsConfig = {
+  // имена для Material Symbols Rounded
+  logo?: string;
+  weather?: string;
+  bell?: string;
+  add?: string;
+  map?: string;
+  feed?: string;
+  profile?: string;
+  like?: string;
+  comment?: string;
+  share?: string;
 };
 
-function getToken(): string | null {
-  try { return localStorage.getItem('token'); } catch { return null; }
-}
+type FeatureFlags = {
+  auth: {
+    local: boolean;
+    oauthGoogle: boolean;
+    oauthVk: boolean;
+    oauthYandex: boolean;
+    oauthApple: boolean;
+    requireAgreementOnSignup: boolean;
+  };
+  ui: {
+    glass: boolean;
+    showWeatherLinkInHeader: boolean;
+  };
+  weather: {
+    allowSavePoint: boolean;
+    requireAuthForWeatherSave: boolean;
+  };
+};
 
-function setToken(token?: string) {
-  try {
-    if (token) localStorage.setItem('token', token);
-  } catch {}
-}
+export type AppConfig = {
+  appName: string;
+  apiBase: string;   // e.g. https://api.fishtrackpro.ru/api/v1
+  authBase: string;  // e.g. https://api.fishtrackpro.ru
+  legal: {
+    termsUrl: string;
+    privacyUrl: string;
+    offerUrl: string;
+  };
+  assets: {
+    logoUrl: string;
+    defaultAvatar: string;
+    bgPattern?: string;
+  };
+  icons: IconsConfig;
+  features: FeatureFlags;
+};
 
-export function logout() {
-  try { localStorage.removeItem('token'); } catch {}
-}
+// ❗ Отредактируйте при необходимости URL-ы для прод/стейдж:
+const config: AppConfig = {
+  appName: "FishTrack Pro",
+  apiBase: (typeof window !== 'undefined'
+    ? (window as any).__API_BASE__
+    : "") || "https://api.fishtrackpro.ru/api/v1",
+  authBase: (typeof window !== 'undefined'
+    ? (window as any).__AUTH_BASE__
+    : "") || "https://api.fishtrackpro.ru",
 
-async function http<T=any>(url: string, opts: HttpOpts = {}): Promise<T> {
-  const {
-    method = 'GET',
-    body,
-    headers = {},
-    auth = true,
-    credentials = 'omit'
-  } = opts;
+  legal: {
+    termsUrl: "https://www.fishtrackpro.ru/legal/terms",
+    privacyUrl: "https://www.fishtrackpro.ru/legal/privacy",
+    offerUrl: "https://www.fishtrackpro.ru/legal/offer",
+  },
 
-  const token = getToken();
+  assets: {
+    logoUrl: "/static/logo.svg",
+    defaultAvatar: "/static/default-avatar.png",
+    bgPattern: "/static/pattern.png",
+  },
 
-  const res = await fetch(url, {
-    method,
-    credentials,
-    headers: {
-      'Accept': 'application/json',
-      ...(body ? { 'Content-Type': 'application/json' } : {}),
-      ...(auth && token ? { 'Authorization': `Bearer ${token}` } : {}),
-      ...headers,
+  icons: {
+    logo: "waves",
+    weather: "partly_cloudy_day",
+    bell: "notifications",
+    add: "add",
+    map: "map",
+    feed: "dynamic_feed",
+    profile: "account_circle",
+    like: "favorite",
+    comment: "chat",
+    share: "share",
+  },
+
+  features: {
+    auth: {
+      local: true,
+      oauthGoogle: true,
+      oauthVk: true,
+      oauthYandex: true,
+      oauthApple: true,
+      requireAgreementOnSignup: true,
     },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+    ui: {
+      glass: true,
+      showWeatherLinkInHeader: true,
+    },
+    weather: {
+      allowSavePoint: true,
+      requireAuthForWeatherSave: true,
+    },
+  },
+};
 
-  // читаем как текст, затем пытаемся JSON
-  const text = await res.text().catch(()=> '');
-  let data: any = null;
-  try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+export default config;
+TS
 
-  if (!res.ok) {
-    const msg = (data && (data.message || data.error)) || `${res.status} ${res.statusText}`;
-    const err: any = new Error(msg);
-    err.status = res.status;
-    err.payload = data;
-    throw err;
-  }
-  return (data ?? undefined) as T;
+###############################################################################
+# styles/app.css – базовый glass + утилиты
+###############################################################################
+cat > "$SRC/styles/app.css" <<'CSS'
+:root{
+  --blur: 12px;
+  --glass-bg: rgba(255,255,255,0.08);
+  --glass-bd: rgba(255,255,255,0.18);
+  --glass-shadow: 0 10px 30px rgba(0,0,0,0.25);
 }
 
-/** ====== bases ====== */
-const base = config.apiBase;     // например: https://api.fishtrackpro.ru/api/v1
-const authBase = config.authBase; // например: https://api.fishtrackpro.ru
-
-/** ====== AUTH на authBase ====== */
-export async function login(email: string, password: string) {
-  const r = await http<{ token?: string; [k:string]: any }>(
-    `${authBase}/auth/login`,
-    { method:'POST', body:{ email, password }, auth:false }
-  );
-  if (r?.token) setToken(r.token);
-  return r;
+*{box-sizing:border-box}
+html,body,#root{height:100%}
+body{
+  margin:0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji","Segoe UI Emoji";
+  color:#fff;
+  background: radial-gradient(1200px 600px at 80% -10%, rgba(90,170,255,.15), transparent 60%),
+              radial-gradient(800px 800px at -10% 120%, rgba(0,255,170,.10), transparent 60%),
+              #0b1220;
+  background-attachment: fixed;
 }
 
-export async function register(
-  name: string,
-  email: string,
-  password: string,
-  username?: string,
-  avatarUrl?: string
-) {
-  const body: any = { name, email, password };
-  if (username) body.username = username;
-  if (avatarUrl) body.photo_url = avatarUrl;
+a{ color: inherit; text-decoration: none; }
 
-  const r = await http<{ token?: string; [k:string]: any }>(
-    `${authBase}/auth/register`,
-    { method:'POST', body, auth:false }
-  );
-  if (r?.token) setToken(r.token);
-  return r;
+.glass{
+  backdrop-filter: blur(var(--blur));
+  -webkit-backdrop-filter: blur(var(--blur));
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-bd);
+  box-shadow: var(--glass-shadow);
+  border-radius: 16px;
 }
 
-export function oauthStart(provider: 'google'|'vk'|'yandex'|'apple') {
-  // редиректим на backend-роут/oauth-провайдера
-  window.location.href = `${authBase}/auth/${provider}/redirect`;
+.header{
+  position: sticky; top: 0; z-index: 10;
+  padding: 10px 14px;
+  display:flex; align-items:center; gap:12px;
 }
 
-export function isAuthed() {
-  return !!getToken();
+.header__spacer{ flex:1 }
+
+.bottom-nav{
+  position: sticky; bottom: 0; z-index: 10;
+  padding: 8px 10px;
+  display:flex; align-items:center; justify-content: space-around;
 }
 
-/** ====== API на apiBase (/api/v1/...) ====== */
-
-// лента
-export async function feed(limit=10, offset=0) {
-  return http(`${base}/feed?limit=${limit}&offset=${offset}`, { method:'GET' });
+.icon-btn{
+  display:inline-flex; gap:8px; align-items:center; padding:8px 12px;
+  border-radius: 12px;
 }
 
-// карта: точки
-export type BBox = { west:number; south:number; east:number; north:number };
-export async function points(limit=500, bbox?: BBox) {
-  const params = new URLSearchParams();
-  params.set('limit', String(limit));
-  if (bbox) {
-    params.set('bbox', `${bbox.west},${bbox.south},${bbox.east},${bbox.north}`);
-  }
-  return http(`${base}/map/points?${params.toString()}`, { method:'GET' });
+.material-symbols-rounded{
+  font-variation-settings: 
+    "FILL" 0,
+    "wght" 400,
+    "GRAD" 0,
+    "opsz" 24;
+  font-size: 22px;
+  line-height:1;
+  vertical-align: middle;
 }
 
-// детали улова
-export async function catchById(id: number|string) {
-  return http(`${base}/catch/${id}`, { method:'GET' });
+.main-wrap{
+  min-height: calc(100dvh - 120px);
+  padding: 12px;
 }
+CSS
 
-// комментарий к улову
-export async function addComment(catchId: number|string, text: string) {
-  return http(`${base}/catch/${catchId}/comments`, { method:'POST', body:{ text } });
-}
+###############################################################################
+# utils: подключение Material Symbols из кода
+###############################################################################
+cat > "$SRC/utils/fonts.ts" <<'TS'
+let injected = false;
 
-// профиль
-export async function profileMe() {
-  return http(`${base}/profile/me`, { method:'GET' });
-}
-
-// уведомления
-export async function notifications() {
-  return http(`${base}/notifications`, { method:'GET' });
-}
-
-// сохранение избранной точки для погоды (только для авторизованных)
-export async function saveWeatherFav(lat: number, lng: number, label?: string) {
-  if (config.auth?.requireAuthForWeatherSave && !isAuthed()) {
-    const err: any = new Error('Требуется авторизация для сохранения точки погоды');
-    err.code = 'AUTH_REQUIRED';
-    throw err;
-  }
-  return http(`${base}/weather/favs`, { method:'POST', body:{ lat, lng, label } });
-}
-
-// получить избранные точки погоды
-export async function getWeatherFavs() {
-  return http(`${base}/weather/favs`, { method:'GET' });
-}
-
-// добавление улова (минимально)
-export async function addCatch(payload: {
-  lat:number; lng:number; species?:string; length?:number; weight?:number;
-  method?:string; bait?:string; gear?:string; caption?:string; photo_url?:string; caught_at?:string;
-}) {
-  return http(`${base}/catch`, { method:'POST', body: payload });
-}
-
-// добавление места (минимально)
-export async function addPlace(payload: {
-  lat:number; lng:number; title:string; description?:string; photos?:string[];
-}) {
-  return http(`${base}/map/places`, { method:'POST', body: payload });
+export function ensureMaterialSymbols() {
+  if (injected || typeof document === 'undefined') return;
+  const id = 'material-symbols-rounded-link';
+  if (document.getElementById(id)) { injected = true; return; }
+  const link = document.createElement('link');
+  link.id = id;
+  link.rel = 'stylesheet';
+  // порядок осей: FILL,wght,GRAD,opsz – строго алфавитно
+  link.href = 'https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:FILL,wght,GRAD,opsz@0,400,0,24';
+  document.head.appendChild(link);
+  injected = true;
 }
 TS
 
-echo "✅ api.ts rewritten at: $API"
-echo "Now run: npm run build"
+###############################################################################
+# components/Icon.tsx – универсальная иконка
+###############################################################################
+cat > "$SRC/components/Icon.tsx" <<'TS'
+import React from 'react';
+
+type IconProps = {
+  name: string;       // имя из Material Symbols
+  className?: string;
+  title?: string;
+  size?: number;      // px
+  fill?: 0|1;
+  weight?: 100|200|300|400|500|600|700;
+};
+
+const Icon: React.FC<IconProps> = ({ name, className, title, size = 22, fill = 0, weight = 400 }) => {
+  const style: React.CSSProperties = {
+    fontVariationSettings: `"FILL" ${fill}, "wght" ${weight}, "GRAD" 0, "opsz" 24`,
+    fontSize: size,
+  };
+  return (
+    <span className={`material-symbols-rounded ${className||''}`} style={style} aria-label={title||name}>
+      {name}
+    </span>
+  );
+};
+
+export default Icon;
+TS
+
+###############################################################################
+# components/Header.tsx – шапка
+###############################################################################
+cat > "$SRC/components/Header.tsx" <<'TS'
+import React from 'react';
+import { Link, useLocation } from 'react-router-dom';
+import config from '../config';
+import Icon from './Icon';
+
+type HeaderProps = {
+  title?: string;
+};
+
+const Header: React.FC<HeaderProps> = ({ title }) => {
+  const loc = useLocation();
+
+  return (
+    <header className="header glass" role="banner" aria-label="main header">
+      <Link to="/" className="icon-btn" aria-label="home">
+        <Icon name={config.icons.logo || 'waves'} size={24} />
+        <strong>{config.appName}</strong>
+      </Link>
+
+      <div className="header__spacer" />
+
+      {config.features.ui.showWeatherLinkInHeader && (
+        <Link to="/weather" className="icon-btn" aria-label="weather link">
+          <Icon name={config.icons.weather || 'partly_cloudy_day'} />
+        </Link>
+      )}
+
+      <Link to="/alerts" className="icon-btn" aria-label="notifications link">
+        <Icon name={config.icons.bell || 'notifications'} />
+      </Link>
+
+      <Link to="/profile" className="icon-btn" aria-label="profile link">
+        <Icon name={config.icons.profile || 'account_circle'} />
+      </Link>
+    </header>
+  );
+};
+
+export default Header;
+TS
+
+###############################################################################
+# components/BottomNav.tsx – нижнее меню
+###############################################################################
+cat > "$SRC/components/BottomNav.tsx" <<'TS'
+import React from 'react';
+import { NavLink } from 'react-router-dom';
+import Icon from './Icon';
+import config from '../config';
+
+const cls = (isActive:boolean) =>
+  `icon-btn ${isActive ? 'glass' : ''}`;
+
+const BottomNav: React.FC = () => {
+  return (
+    <nav className="bottom-nav glass" role="navigation" aria-label="bottom navigation">
+      <NavLink to="/" className={({isActive}) => cls(isActive)} aria-label="feed">
+        <Icon name={config.icons.feed || 'dynamic_feed'} />
+      </NavLink>
+
+      <NavLink to="/map" className={({isActive}) => cls(isActive)} aria-label="map">
+        <Icon name={config.icons.map || 'map'} />
+      </NavLink>
+
+      <NavLink to="/add/catch" className={({isActive}) => cls(isActive)} aria-label="add catch">
+        <Icon name={config.icons.add || 'add'} />
+      </NavLink>
+
+      <NavLink to="/alerts" className={({isActive}) => cls(isActive)} aria-label="alerts">
+        <Icon name={config.icons.bell || 'notifications'} />
+      </NavLink>
+
+      <NavLink to="/profile" className={({isActive}) => cls(isActive)} aria-label="profile">
+        <Icon name={config.icons.profile || 'account_circle'} />
+      </NavLink>
+    </nav>
+  );
+};
+
+export default BottomNav;
+TS
+
+###############################################################################
+# layouts/AppLayout.tsx – универсальный каркас
+###############################################################################
+cat > "$SRC/layouts/AppLayout.tsx" <<'TS'
+import React from 'react';
+import Header from '../components/Header';
+import BottomNav from '../components/BottomNav';
+
+type Props = {
+  children: React.ReactNode;
+};
+
+const AppLayout: React.FC<Props> = ({ children }) => {
+  return (
+    <div>
+      <Header />
+      <main className="main-wrap">
+        {children}
+      </main>
+      <BottomNav />
+    </div>
+  );
+};
+
+export default AppLayout;
+TS
+
+###############################################################################
+# AppRoot.tsx – маршруты с «умным» lazy
+###############################################################################
+cat > "$SRC/AppRoot.tsx" <<'TS'
+import React, { Suspense, lazy } from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import AppLayout from './layouts/AppLayout';
+
+// утилита: поддержка default ИЛИ именованных экспортов
+function smartLazy<T = any>(path: string, named?: string) {
+  return lazy(async () => {
+    const m: any = await import(/* @vite-ignore */ path);
+    const picked = m?.default ?? (named ? m[named] : undefined) ?? Object.values(m).find((v:any)=> typeof v === 'function') ?? (()=>null);
+    return { default: picked };
+  });
+}
+
+// страницы (не трогаем ваши файлы — просто подхватываем что есть)
+const FeedScreen         = smartLazy('./pages/FeedScreen', 'FeedScreen');
+const MapScreen          = smartLazy('./pages/MapScreen', 'MapScreen');
+const AddCatchPage       = smartLazy('./pages/AddCatchPage', 'AddCatchPage');
+const AddPlacePage       = smartLazy('./pages/AddPlacePage', 'AddPlacePage');
+const NotificationsPage  = smartLazy('./pages/NotificationsPage', 'NotificationsPage');
+const ProfilePage        = smartLazy('./pages/ProfilePage', 'ProfilePage');
+const WeatherPage        = smartLazy('./pages/WeatherPage', 'WeatherPage');
+const CatchDetailPage    = smartLazy('./pages/CatchDetailPage', 'CatchDetailPage');
+const PlaceDetailPage    = smartLazy('./pages/PlaceDetailPage', 'PlaceDetailPage');
+
+const Fallback: React.FC = () => (
+  <div className="glass" style={{padding:16}}>Загрузка…</div>
+);
+
+const AppRoot: React.FC = () => {
+  return (
+    <BrowserRouter>
+      <AppLayout>
+        <Suspense fallback={<Fallback/>}>
+          <Routes>
+            <Route path="/" element={<FeedScreen/>} />
+            <Route path="/map" element={<MapScreen/>} />
+            <Route path="/add/catch" element={<AddCatchPage/>} />
+            <Route path="/add/place" element={<AddPlacePage/>} />
+            <Route path="/alerts" element={<NotificationsPage/>} />
+            <Route path="/profile" element={<ProfilePage/>} />
+            <Route path="/weather" element={<WeatherPage/>} />
+            <Route path="/catch/:id" element={<CatchDetailPage/>} />
+            <Route path="/place/:id" element={<PlaceDetailPage/>} />
+            <Route path="*" element={<div className="glass" style={{padding:16}}>Страница не найдена</div>} />
+          </Routes>
+        </Suspense>
+      </AppLayout>
+    </BrowserRouter>
+  );
+};
+
+export default AppRoot;
+TS
+
+###############################################################################
+# App.tsx – базовый провайдер
+###############################################################################
+cat > "$SRC/App.tsx" <<'TS'
+import React from 'react';
+import './styles/app.css';
+import AppRoot from './AppRoot';
+
+const App: React.FC = () => {
+  return <AppRoot />;
+};
+
+export default App;
+TS
+
+###############################################################################
+# main.tsx – монтирование + подключение шрифта + лог ошибок регистрации
+###############################################################################
+cat > "$SRC/main.tsx" <<'TS'
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import App from './App';
+import { ensureMaterialSymbols } from './utils/fonts';
+
+ensureMaterialSymbols();
+
+const el = document.getElementById('root');
+if (!el) {
+  const e = document.createElement('div');
+  e.id = 'root';
+  document.body.appendChild(e);
+}
+
+createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+
+console.log('[boot] App mounted');
+
+// global handler — чтобы «Failed to fetch» показывался понятно
+window.addEventListener('unhandledrejection', (ev) => {
+  const r = ev.reason;
+  const msg = (r && (r.message || r.toString())) || 'Network error';
+  if (String(msg).includes('Failed to fetch')) {
+    console.warn('[network] Вероятно, сеть/CORS/backend:', msg);
+  }
+});
+TS
+
+echo "✅ Каркас навигации и дизайн обновлены."
+echo "Теперь: npm run build && npm run preview  (или ваш дев-сервер)"
