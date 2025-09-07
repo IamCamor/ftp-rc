@@ -1,44 +1,42 @@
-/**
- * Единый конфиг приложения.
- * ВАЖНО: default export!
- */
 export type AppConfig = {
-  apiBase: string;
-  debugNetwork: boolean;
-  ui: {
+  apiBase: string;        // База API (по ТЗ: /api/v1)
+  siteBase: string;       // База сайта (для ссылок)
+  images: {
     logoUrl: string;
     defaultAvatar: string;
-    bgPattern: string;
-    icons: Record<string, string>;
+    backgroundPattern: string;
+  };
+  icons: {
+    like: string;
+    comment: string;
+    share: string;
+    map: string;
+    add: string;
+    alerts: string;
+    profile: string;
+    weather: string;
+    home: string;
   };
 };
 
-const API_FROM_WINDOW =
-  (typeof window !== 'undefined' && (window as any).__API_BASE__) || '';
-
 const config: AppConfig = {
-  apiBase: API_FROM_WINDOW || 'https://api.fishtrackpro.ru',
-  debugNetwork: false,
-  ui: {
-    // поставьте сюда ваш лого, можно абсолютный https://
-    logoUrl: '/logo.svg',
-    // дефолтная аватарка (желательно https, чтобы не ловить mixed content/cert)
-    defaultAvatar: 'https://www.fishtrackpro.ru/assets/default-avatar.png',
-    // фоновый паттерн
-    bgPattern: 'https://www.fishtrackpro.ru/assets/pattern.png',
-    // материал-иконки по ключам
-    icons: {
-      feed: 'home',
-      map: 'map',
-      add: 'add_circle',
-      alerts: 'notifications',
-      profile: 'account_circle',
-      like: 'favorite',
-      comment: 'chat_bubble',
-      share: 'share',
-      weather: 'cloud',
-      back: 'arrow_back',
-    },
+  apiBase: 'https://api.fishtrackpro.ru/api/v1',
+  siteBase: 'https://www.fishtrackpro.ru',
+  images: {
+    logoUrl: '/assets/logo.svg',
+    defaultAvatar: '/assets/default-avatar.png', // Подложка; если нет — отменится на /src/assets
+    backgroundPattern: '/assets/bg-pattern.png',
+  },
+  icons: {
+    like: 'favorite',
+    comment: 'chat_bubble',
+    share: 'share',
+    map: 'map',
+    add: 'add_location_alt',
+    alerts: 'notifications',
+    profile: 'account_circle',
+    weather: 'partly_cloudy_day',
+    home: 'home',
   },
 };
 

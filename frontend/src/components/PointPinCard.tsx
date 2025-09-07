@@ -1,25 +1,19 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 
-type Props = {
-  id: string|number;
-  type?: 'place'|'catch';
-  title?: string;
-  photos?: string[];
-};
-
-const PointPinCard: React.FC<Props> = ({ id, type='place', title='Точка', photos=[] }) => {
-  const href = type === 'catch' ? `/catch/${id}` : `/place/${id}`;
-  const img = photos[0];
+type Point = { id?: number|string; lat:number; lng:number; title?:string; photos?:string[]; kind?: 'place'|'catch' };
+const PointPinCard: React.FC<{p:Point}> = ({p}) => {
+  const img = p.photos?.[0];
+  const link = p.kind === 'catch' ? `/catch/${p.id}` : `/place/${p.id}`;
   return (
-    <div className="glass card" style={{minWidth:220}}>
-      {img && <img src={img} alt={title} style={{width:'100%',height:140,objectFit:'cover',borderRadius:12,marginBottom:8}}/>}
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
-        <div>
-          <div style={{fontWeight:600}}>{title}</div>
-          <div className="subtle">{type === 'catch' ? 'Улов' : 'Место'}</div>
+    <div className="glass card" style={{display:'flex', gap:10}}>
+      {img && <img src={img} alt="" style={{width:72, height:72, objectFit:'cover', borderRadius:8}} />}
+      <div style={{flex:1}}>
+        <div style={{fontWeight:600}}>{p.title || 'Точка'}</div>
+        <div className="muted" style={{fontSize:12}}>
+          {p.lat.toFixed(4)}, {p.lng.toFixed(4)}
         </div>
-        <Link to={href} className="btn">Открыть</Link>
+        {p.id && <Link to={link} className="btn" style={{marginTop:8}}>Открыть</Link>}
       </div>
     </div>
   );

@@ -1,23 +1,29 @@
 import React, { useEffect, useState } from 'react';
 import { notifications } from '../api';
 
-const NotificationsPage:React.FC = () => {
-  const [items, setItems] = useState<any[]>([]);
+const NotificationsPage: React.FC = () => {
+  const [list, setList] = useState<any[]>([]);
   const [err, setErr] = useState('');
-  useEffect(() => {
-    (async () => {
-      try { setItems(await notifications()); } catch (e:any) { setErr(e?.message || 'Ошибка'); }
-    })();
-  }, []);
+
+  useEffect(()=>{
+    notifications()
+      .then(r => setList(Array.isArray(r)? r: []))
+      .catch(e => setErr(e.message || 'Маршрут уведомлений не найден'));
+  },[]);
+
   return (
     <div className="container">
-      <div className="glass card" style={{marginTop:16}}>
-        <h2>Уведомления</h2>
-        {err && <div className="subtle">{err}</div>}
-        {!items.length && !err && <div className="subtle">Пока нет уведомлений</div>}
-        <ul>
-          {items.map((n:any, i:number) => <li key={i}>{n.title || n.text || 'Уведомление'}</li>)}
-        </ul>
+      <h2 className="h2">Уведомления</h2>
+      {err && <div className="card glass" style={{color:'#ffb4b4'}}>{err}</div>}
+      {!err && list.length===0 && <div className="card glass">Пока пусто</div>}
+      <div className="grid">
+        {list.map((n,i)=>(
+          <div key={i} className="card glass">
+            <div style={{fontWeight:600}}>{n.title || 'Уведомление'}</div>
+            <div className="muted">{n.created_at ? new Date(n.created_at).toLocaleString(): ''}</div>
+            <div style={{marginTop:6}}>{n.text || n.message || ''}</div>
+          </div>
+        ))}
       </div>
     </div>
   );

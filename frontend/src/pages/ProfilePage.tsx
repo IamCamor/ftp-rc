@@ -1,27 +1,38 @@
 import React, { useEffect, useState } from 'react';
-import { profileMe } from '../api';
 import config from '../config';
+import { profileMe, isAuthed, logout } from '../api';
 
-const ProfilePage:React.FC = () => {
+const ProfilePage: React.FC = () => {
   const [me, setMe] = useState<any>(null);
-  const [err, setErr] = useState('');
-  useEffect(() => { (async ()=>{ try { setMe(await profileMe()); } catch(e:any){ setErr(e?.message||'Ошибка'); }})(); }, []);
+  const [err, setErr] = useState<string>('');
+
+  useEffect(() => {
+    if (!isAuthed()) {
+      setErr('Требуется вход в систему.');
+      return;
+    }
+    profileMe()
+      .then(setMe)
+      .catch((e) => setErr(e.message || 'Не удалось загрузить профиль'));
+  }, []);
+
+  const avatar = me?.photo_url || config?.images?.defaultAvatar || '/assets/default-avatar.png';
+
   return (
     <div className="container">
-      <div className="glass card" style={{marginTop:16}}>
-        <h2>Профиль</h2>
-        {err && <div className="subtle">{err}</div>}
-        {me ? (
-          <div style={{display:'flex',gap:12,alignItems:'center'}}>
-            <img src={me.avatar || config.brand.defaultAvatar} alt="" style={{width:72,height:72,borderRadius:16,objectFit:'cover'}}/>
-            <div>
-              <div style={{fontWeight:600}}>{me.name || 'Без имени'}</div>
-              <div className="subtle">Бонусы: {me.bonus_balance ?? 0}</div>
-            </div>
-          </div>
-        ) : !err && <div className="subtle">Загрузка…</div>}
+      <div className="glass card" style={{display:'flex', gap:12, alignItems:'center'}}>
+        <img src={avatar} alt="avatar" style={{width:64, height:64, borderRadius:'50%', objectFit:'cover'}} />
+        <div style={{flex:1}}>
+          <div style={{fontWeight:600}}>{me?.name || '—'}</div>
+          <div className="muted">{me?.email || ''}</div>
+        </div>
+        {isAuthed() && (
+          <button className="btn" onClick={()=>{ logout(); location.href='/login'; }}>Выйти</button>
+        )}
       </div>
+      {err && <div className="card glass" style={{color:'#ffb4b4', marginTop:10}}>{err}</div>}
     </div>
   );
 };
+
 export default ProfilePage;

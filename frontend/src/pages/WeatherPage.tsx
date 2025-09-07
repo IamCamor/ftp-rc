@@ -1,23 +1,27 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { getWeatherFavs } from '../api';
-import { Link } from 'react-router-dom';
 
-const WeatherPage:React.FC = () => {
-  const favs = useMemo(() => getWeatherFavs(), []);
+const WeatherPage: React.FC = () => {
+  const favs = getWeatherFavs();
+  const list = Array.isArray(favs) ? favs : [];
+
   return (
     <div className="container">
-      <div className="glass card" style={{marginTop:16}}>
-        <h2>Погода</h2>
-        {!favs.length && <div className="subtle">Добавьте точку на карте (клик по карте → «В погоду»), и она появится здесь.</div>}
-        <ul>
-          {favs.map((f,i) => (
-            <li key={i}>
-              {f.name} — <Link to={`/map`}>на карте</Link>
+      <h2 className="h2">Погода</h2>
+      {list.length === 0 ? (
+        <div className="muted glass card">Пока ни одной избранной точки. Нажмите по карте, чтобы добавить.</div>
+      ) : (
+        <ul className="grid" style={{listStyle:'none', padding:0}}>
+          {list.map((p, idx) => (
+            <li key={idx} className="card glass">
+              <div style={{fontWeight:600}}>{p.title || `Точка (${p.lat.toFixed(4)}, ${p.lng.toFixed(4)})`}</div>
+              <div className="muted">температура: — / ветер: — (добавим, когда появится серверный маршрут)</div>
             </li>
           ))}
         </ul>
-      </div>
+      )}
     </div>
   );
 };
+
 export default WeatherPage;

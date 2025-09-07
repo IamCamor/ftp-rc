@@ -1,203 +1,140 @@
 import config from './config';
 
-type FetchOpts = {
-  method?: 'GET'|'POST'|'PUT'|'DELETE',
-  body?: any,
-  headers?: Record<string,string>,
-  credentials?: RequestCredentials
+type HttpOptions = {
+  method?: 'GET'|'POST'|'PUT'|'PATCH'|'DELETE';
+  body?: any;
+  auth?: boolean;
+  headers?: Record<string,string>;
 };
 
-function joinUrl(base:string, path:string) {
-  if (!base) return path;
-  if (path.startsWith('http')) return path;
-  const b = base.replace(/\/+$/,''); const p = path.replace(/^\/+/,'');
-  return `${b}/${p}`;
+function getToken(): string | null {
+  try { return localStorage.getItem('token'); } catch { return null; }
 }
-function dedupe<T>(arr:T[]):T[] {
-  const seen = new Set<string>();
-  return arr.filter((x:any) => {
-    const key = String(x || '');
-    if (seen.has(key)) return false;
-    seen.add(key); return true;
-  });
-}
-async function httpRaw(url:string, opts:FetchOpts): Promise<{res:Response, raw:string, json:any}> {
+
+async function http<T=any>(url: string, opts: HttpOptions = {}): Promise<T> {
+  const { method='GET', body, auth=true, headers={} } = opts;
+  const token = getToken();
+
   const res = await fetch(url, {
-    method: opts.method ?? 'GET',
-    headers: opts.headers,
-    credentials: opts.credentials ?? 'include',
-    body: opts.body,
+    method,
+    mode: 'cors',
+    credentials: 'omit', // CORS на бэке уже ок — передаём токен заголовком
+    headers: {
+      'Accept': 'application/json',
+      ...(body ? {'Content-Type': 'application/json'} : {}),
+      ...(auth && token ? { 'Authorization': `Bearer ${token}` } : {}),
+      ...headers,
+    },
+    body: body ? JSON.stringify(body) : undefined,
   });
-  const raw = await res.text();
-  let json:any;
-  try { json = raw ? JSON.parse(raw) : {}; } catch { json = raw; }
-  return { res, raw, json };
-}
 
-/** универсальный ретрай по базам и префиксам */
-export async function httpTry<T=any>(path:string, opts:FetchOpts = {}): Promise<T> {
-  const bases = dedupe<string>([
-    config.apiBase || '',
-    (typeof window !== 'undefined' && (window as any).__API_BASE__) || '',
-    (typeof window !== 'undefined' && window.location?.origin) || ''
-  ]).filter(Boolean);
-  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-  const pathVariants = dedupe<string>([
-    normalizedPath.startsWith('/api/v1/') ? normalizedPath : `/api/v1${normalizedPath}`,
-    normalizedPath.startsWith('/api/')    ? normalizedPath : `/api${normalizedPath}`,
-    normalizedPath
-  ]);
+  if (res.status === 204) return undefined as unknown as T;
 
-  const tried: {url:string, status?:number, note?:string}[] = [];
-  let lastErr:any = null;
+  let data: any = null;
+  const text = await res.text().catch(()=> '');
+  try { data = text ? JSON.parse(text) : null; } catch { data = text; }
 
-  for (const base of bases) {
-    for (const pv of pathVariants) {
-      const url = joinUrl(base, pv);
-      try {
-        const {res, json} = await httpRaw(url, opts);
-        tried.push({url, status:res.status});
-        if (!res.ok) { lastErr = {status:res.status, payload:json}; continue; }
-        return json as T;
-      } catch (e:any) {
-        tried.push({url, note: e?.message || 'fetch error'});
-        lastErr = e; continue;
-      }
-    }
+  if (!res.ok) {
+    const msg = (data && (data.message || data.error)) || `${res.status} ${res.statusText}`;
+    throw new Error(msg);
   }
+  return data as T;
+}
 
-  if (config.debugNetwork && typeof window !== 'undefined') {
-    console.groupCollapsed(`🔴 httpTry fail: ${path}`);
-    console.table(tried);
-    console.groupEnd();
+function unwrap<T=any>(x: any, fallback: T): T {
+  if (x == null) return fallback;
+  if (Array.isArray(x)) return x as T;
+  if (typeof x === 'object' && Array.isArray((x as any).data)) return (x as any).data as T;
+  return x as T;
+}
+
+const base = config.apiBase;
+
+// feed
+export async function feed(params: {limit?: number; offset?: number} = {}) {
+  const q = new URLSearchParams();
+  if (params.limit) q.set('limit', String(params.limit));
+  if (params.offset) q.set('offset', String(params.offset));
+  const r = await http<any>(`${base}/feed${q.toString()?`?${q.toString()}`:''}`);
+  return unwrap<any[]>(r, []);
+}
+
+// map points
+export async function points(bbox?: string, limit = 500) {
+  const q = new URLSearchParams();
+  q.set('limit', String(limit));
+  if (bbox) q.set('bbox', bbox);
+  const r = await http<any>(`${base}/map/points?${q.toString()}`);
+  return unwrap<any[]>(r, []);
+}
+
+// catch & place details
+export async function catchById(id: string|number){ return await http<any>(`${base}/catch/${id}`); }
+export async function placeById(id: string|number){ return await http<any>(`${base}/place/${id}`); }
+
+// comments / likes (потребуют рабочие маршруты на бэке)
+export async function addCatchComment(id:number|string, text:string){
+  return await http(`${base}/catch/${id}/comments`, {method:'POST', body:{text}});
+}
+export async function likeCatch(id:number|string){
+  return await http(`${base}/catch/${id}/like`, {method:'POST'});
+}
+
+// notifications
+export async function notifications() {
+  const r = await http<any>(`${base}/notifications`);
+  return unwrap<any[]>(r, []);
+}
+
+// profile
+export async function profileMe(){ return await http<any>(`${base}/profile/me`); }
+
+// weather favs (локально)
+export function getWeatherFavs(): Array<{lat:number; lng:number; title?:string; id?:string|number}> {
+  try {
+    const raw = localStorage.getItem('weather_favs');
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
   }
-  const msg =
-    (lastErr && (lastErr.payload?.message || lastErr.payload?.error)) ||
-    (typeof lastErr?.status === 'number' ? `HTTP ${lastErr.status}` : (lastErr?.message || 'Network/Route error'));
-  const err:any = new Error(msg);
-  (err as any).tried = tried;
-  throw err;
+}
+export function saveWeatherFav(p: {lat:number; lng:number; title?:string}) {
+  const list = getWeatherFavs();
+  list.push(p);
+  try { localStorage.setItem('weather_favs', JSON.stringify(list)); } catch {}
+  return list;
 }
 
-/** нормализация ответа в массив */
-function normalizeArray(payload:any): any[] {
-  if (Array.isArray(payload)) return payload;
-  if (!payload) return [];
-  if (Array.isArray(payload.items)) return payload.items;
-  if (Array.isArray(payload.data)) return payload.data;
-  if (Array.isArray(payload.results)) return payload.results;
-  if (Array.isArray(payload.rows)) return payload.rows;
-  return [];
-}
-
-/** health-check */
-export async function ping(): Promise<{ok:boolean, base:string}|null> {
-  const bases = dedupe<string>([
-    config.apiBase || '',
-    (typeof window !== 'undefined' && (window as any).__API_BASE__) || '',
-    (typeof window !== 'undefined' && window.location?.origin) || ''
-  ]).filter(Boolean);
-  for (const base of bases) {
-    try {
-      const u = joinUrl(base, '/api/health');
-      const {res} = await httpRaw(u, {method:'GET'});
-      if (res.ok) return {ok:true, base};
-    } catch {}
-  }
-  return null;
-}
-
-/** ------------ Endpoints ------------- */
-export type PointsQuery = { limit?: number; bbox?: string | [number,number,number,number]; filter?: string };
-export async function points(q: PointsQuery = {}): Promise<any[]> {
-  const p = new URLSearchParams();
-  if (q.limit) p.set('limit', String(q.limit));
-  if (q.filter) p.set('filter', q.filter);
-  if (q.bbox) p.set('bbox', Array.isArray(q.bbox) ? q.bbox.join(',') : q.bbox);
-  const res = await httpTry<any>(`/map/points?${p.toString()}`, { method:'GET' });
-  return normalizeArray(res);
-}
-
-export async function feed(limit=10, offset=0): Promise<any[]> {
-  const res = await httpTry<any>(`/feed?limit=${limit}&offset=${offset}`, { method:'GET' });
-  return normalizeArray(res);
-}
-
-export async function profileMe(): Promise<any> {
-  return httpTry<any>('/profile/me', { method:'GET' });
-}
-
-export async function notifications(): Promise<any[]> {
-  const res = await httpTry<any>('/notifications', { method:'GET' });
-  return normalizeArray(res);
-}
-
-/** Weather favorites */
-export type WeatherFav = { id?: number; lat:number; lng:number; title?:string };
-export async function getWeatherFavs(): Promise<WeatherFav[]> {
-  const res = await httpTry<any>('/weather/favs', { method:'GET' });
-  return normalizeArray(res) as WeatherFav[];
-}
-export async function saveWeatherFav(fav: WeatherFav): Promise<any> {
-  return httpTry<any>('/weather/favs', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify(fav)
-  });
-}
-
-/** Вспомогательные сабмиты */
-export function toMysqlDatetime(input: string|Date): string {
-  const d = typeof input === 'string' ? new Date(input) : input;
-  const pad = (n:number)=> (n<10?'0':'')+n;
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-}
-async function postMultipart<T=any>(path:string, data:Record<string,any>): Promise<T> {
-  const fd = new FormData();
-  Object.entries(data).forEach(([k,v])=>{
-    if (v === undefined || v === null) return;
-    if (Array.isArray(v)) v.forEach((vv)=> fd.append(k, vv as any));
-    else fd.append(k, v as any);
-  });
-  return httpTry<T>(path, { method:'POST', body: fd, credentials:'include' });
-}
-async function postJson<T=any>(path:string, data:any): Promise<T> {
-  return httpTry<T>(path, { method:'POST', body: JSON.stringify(data), headers:{'Content-Type':'application/json'} });
-}
-
-/** Catch */
-export type CatchPayload = {
-  lat:number; lng:number;
-  species:string;
-  length?:number; weight?:number;
-  style?:string; lure?:string; tackle?:string;
-  notes?:string; photo?: File|null;
-  caught_at: string; // YYYY-MM-DD HH:mm:ss
+// add catch/place (формы)
+export async function addCatch(payload: {
+  species?: string; length?: number; weight?: number;
+  style?: string; lure?: string; tackle?: string;
+  notes?: string; photo_url?: string;
+  lat?: number; lng?: number; caught_at?: string; // ISO
   privacy?: 'all'|'friends'|'private';
-};
-export async function createCatch(payload: CatchPayload): Promise<any> {
-  const body:any = { ...payload };
-  if (payload.photo) body.photo = payload.photo;
-  return postMultipart('/catch', body);
+}) {
+  return await http(`${base}/catch`, {method:'POST', body: payload});
 }
 
-/** Place */
-export type PlacePayload = {
-  title:string;
-  description?:string;
-  lat:number; lng:number;
-  water_type?: 'river'|'lake'|'sea'|'pond'|'other';
-  access?: 'free'|'paid'|'restricted';
-  season?: string;
-  tags?: string;
-  photos?: File[];
-  privacy?: 'all'|'friends'|'private';
-};
-export async function createPlace(payload: PlacePayload): Promise<any> {
-  const body:any = { ...payload };
-  if (payload.photos && payload.photos.length) body.photos = payload.photos;
-  return postMultipart('/places', body);
+export async function addPlace(payload: {
+  title: string; description?: string;
+  lat: number; lng: number;
+  photos?: string[];
+}) {
+  return await http(`${base}/place`, {method:'POST', body: payload});
 }
-export async function getPlaceById(id: string|number): Promise<any> {
-  return httpTry<any>(`/places/${id}`, { method:'GET' });
+
+// auth
+export async function login(email: string, password: string) {
+  const r = await http<{token:string}>(`${base}/auth/login`, {method:'POST', body:{email,password}, auth:false});
+  if (r?.token) localStorage.setItem('token', r.token);
+  return r;
 }
+export async function register(name: string, email: string, password: string) {
+  const r = await http<{token:string}>(`${base}/auth/register`, {method:'POST', body:{name,email,password}, auth:false});
+  if (r?.token) localStorage.setItem('token', r.token);
+  return r;
+}
+export function logout(){ try { localStorage.removeItem('token'); } catch {} }
+export function isAuthed(){ return !!getToken(); }
